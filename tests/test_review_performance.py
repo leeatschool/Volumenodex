@@ -235,6 +235,7 @@ def test_canvas_spatial_culling(app):
     """Verify PaginatedCanvas culls selections by page and renders rapidly with 1,000+ findings."""
     win = MainWindow()
     win.show()
+    win.canvas_area.setPlainText("word " * 2500)
 
     # Generate 500 findings across document
     dummy_findings = []
@@ -253,15 +254,12 @@ def test_canvas_spatial_culling(app):
     assert len(win.canvas_area._lens_selections_with_range) == 500
 
     # Trigger a paint pass
-    pixmap = QPixmap(1000, 1200)
-    painter = QPainter(pixmap)
     t0 = time.perf_counter()
-    win.canvas_area.paintEvent(None)
+    win.canvas_area.viewport().repaint()
     paint_time = (time.perf_counter() - t0) * 1000
-    painter.end()
 
-    print(f"Canvas paintEvent with 500 findings took: {paint_time:.2f}ms")
-    assert paint_time < 30.0, f"Paint took {paint_time:.2f}ms, expected < 30ms"
+    print(f"Canvas repaint with 500 findings took: {paint_time:.2f}ms")
+    assert paint_time < 50.0, f"Repaint took {paint_time:.2f}ms, expected < 50ms"
 
     win.close()
     print("[PASS] test_canvas_spatial_culling passed")

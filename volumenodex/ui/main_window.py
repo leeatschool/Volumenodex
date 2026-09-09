@@ -271,6 +271,28 @@ class MainWindow(QMainWindow):
 
         edit_menu.addSeparator()
 
+        act_find = QAction("Find...", self)
+        act_find.setShortcut(QKeySequence.StandardKey.Find)
+        act_find.triggered.connect(lambda: self.canvas_area.show_find(replace_mode=False))
+        edit_menu.addAction(act_find)
+
+        act_replace = QAction("Replace...", self)
+        act_replace.setShortcut(QKeySequence.StandardKey.Replace)
+        act_replace.triggered.connect(lambda: self.canvas_area.show_find(replace_mode=True))
+        edit_menu.addAction(act_replace)
+
+        act_find_next = QAction("Find Next", self)
+        act_find_next.setShortcut(QKeySequence("F3"))
+        act_find_next.triggered.connect(self._on_find_next_shortcut)
+        edit_menu.addAction(act_find_next)
+
+        act_find_prev = QAction("Find Previous", self)
+        act_find_prev.setShortcut(QKeySequence("Shift+F3"))
+        act_find_prev.triggered.connect(self._on_find_prev_shortcut)
+        edit_menu.addAction(act_find_prev)
+
+        edit_menu.addSeparator()
+
         act_select_all = QAction("Select All", self)
         act_select_all.setShortcut(QKeySequence.StandardKey.SelectAll)
         act_select_all.triggered.connect(self.editor.selectAll)
@@ -318,6 +340,10 @@ class MainWindow(QMainWindow):
         self.ribbon.pastePlainRequested.connect(self._paste_plain_text)
         self.ribbon.cutRequested.connect(ed.cut)
         self.ribbon.copyRequested.connect(ed.copy)
+
+        # Search & Replace
+        self.ribbon.findRequested.connect(lambda: self.canvas_area.show_find(replace_mode=False))
+        self.ribbon.replaceRequested.connect(lambda: self.canvas_area.show_find(replace_mode=True))
 
         # Formatting
         self.ribbon.fontFamilyChanged.connect(ed.setFontFamily)
@@ -878,6 +904,20 @@ class MainWindow(QMainWindow):
     def _paste_plain_text(self) -> None:
         """Pastes plain text without formatting matching surrounding format."""
         self.canvas_area.paste_plain()
+
+    def _on_find_next_shortcut(self) -> None:
+        """Navigates to the next search match or summons find bar if closed."""
+        if hasattr(self.canvas_area, "find_replace_bar") and self.canvas_area.find_replace_bar.isVisible():
+            self.canvas_area.find_replace_bar.find_next()
+        else:
+            self.canvas_area.show_find(replace_mode=False)
+
+    def _on_find_prev_shortcut(self) -> None:
+        """Navigates to the previous search match or summons find bar if closed."""
+        if hasattr(self.canvas_area, "find_replace_bar") and self.canvas_area.find_replace_bar.isVisible():
+            self.canvas_area.find_replace_bar.find_prev()
+        else:
+            self.canvas_area.show_find(replace_mode=False)
 
     def _apply_style(self, style_name: str) -> None:
         self.canvas_area.apply_style(style_name)

@@ -2,7 +2,7 @@
 
 import os
 import math
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Tuple
 from PySide6.QtCore import Qt, Signal, QRectF, QRect, QPointF, QPoint, QTimer, QSize, QSizeF, QUrl
 from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QFont, QTextCursor, QTextDocument,
@@ -62,9 +62,19 @@ class PaginatedCanvas(QAbstractScrollArea):
         self._lens_selections_with_range = []
         self.spell_engine = None
 
+        # Search and Replace matches state
+        self._search_matches = []
+        self._current_search_match_index = -1
+        self._search_selections_with_range = []
+
         # Drop shadow caching
         self._cached_shadow: Optional[QPixmap] = None
         self._cached_shadow_size: Optional[tuple] = None
+
+        # Floating Find & Replace HUD
+        from volumenodex.ui.find_replace_bar import FindReplaceBar
+        self.find_replace_bar = FindReplaceBar(self, self.viewport())
+        self.find_replace_bar.hide()
 
         # Blinking Cursor Timer (500ms)
         self._blink_timer = QTimer(self)
@@ -172,6 +182,8 @@ class PaginatedCanvas(QAbstractScrollArea):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.sync_document_geometry()
+        if hasattr(self, "find_replace_bar") and self.find_replace_bar:
+            self._reposition_find_bar()
 
     def scrollContentsBy(self, dx: int, dy: int):
         super().scrollContentsBy(dx, dy)
@@ -179,6 +191,8 @@ class PaginatedCanvas(QAbstractScrollArea):
         pw = self.layout_model.page_width_px
         page_x = max(32, (vw - pw) // 2) - self.horizontalScrollBar().value()
         self.pageOffsetChanged.emit(int(page_x))
+        if hasattr(self, "find_replace_bar") and self.find_replace_bar:
+            self._reposition_find_bar()
         self.viewport().update()
 
     # --- Painting Engine: Photorealistic Sheets, Grain, and Typography ---
@@ -277,6 +291,11 @@ class PaginatedCanvas(QAbstractScrollArea):
                         page_selections.append(sel)
             elif hasattr(self, "_lens_selections") and self._lens_selections:
                 page_selections.extend(self._lens_selections)
+
+            if hasattr(self, "_search_selections_with_range") and self._search_selections_with_range:
+                for s_start, s_end, sel in self._search_selections_with_range:
+                    if not (s_end < p_start_pos or s_start > p_end_pos):
+                        page_selections.append(sel)
 
             if self._cursor.hasSelection():
                 c_start = self._cursor.selectionStart()
@@ -512,6 +531,18 @@ class PaginatedCanvas(QAbstractScrollArea):
             fmt = QTextCharFormat()
             fmt.setFontUnderline(not self._cursor.charFormat().fontUnderline())
             self._cursor.mergeCharFormat(fmt)
+        elif is_ctrl and key == Qt.Key.Key_F:
+            self.show_find(replace_mode=False)
+        elif is_ctrl and key == Qt.Key.Key_H:
+            self.show_find(replace_mode=True)
+        elif key == Qt.Key.Key_F3:
+            if hasattr(self, "find_replace_bar") and self.find_replace_bar.isVisible():
+                if is_shift:
+                    self.find_replace_bar.find_prev()
+                else:
+                    self.find_replace_bar.find_next()
+            else:
+                self.show_find(replace_mode=False)
 
         # 4. Text Input
         elif event.text() and not is_ctrl:
@@ -1072,6 +1103,69 @@ class PaginatedCanvas(QAbstractScrollArea):
         self._cursor.setPosition(min(end_pos, self._doc.characterCount() - 1), QTextCursor.MoveMode.KeepAnchor)
         self.scroll_to_position(start_pos)
         self.viewport().update()
+
+    def set_search_matches(self, matches: List[Tuple[int, int]], current_index: int = -1) -> None:
+        """Highlights all search matches across the paginated sheets with active match accent."""
+        self._search_matches = matches
+        self._current_search_match_index = current_index
+        self._search_selections_with_range = []
+        doc_len = self._doc.characterCount()
+
+        for idx, (start_pos, end_pos) in enumerate(matches):
+            sel = QAbstractTextDocumentLayout.Selection()
+            c = QTextCursor(self._doc)
+            c.setPosition(start_pos)
+            c.setPosition(min(end_pos, doc_len - 1), QTextCursor.MoveMode.KeepAnchor)
+            sel.cursor = c
+            fmt = QTextCharFormat()
+
+            if idx == current_index:
+                # Active match: vibrant golden orange with high contrast
+                fmt.setBackground(QColor("#ff9e3b"))
+                fmt.setForeground(QColor("#16161e"))
+                fmt.setFontWeight(QFont.Weight.Bold)
+            else:
+                # Background matches: luminous soft golden yellow highlight
+                fmt.setBackground(QColor(255, 215, 0, 80))
+            sel.format = fmt
+            self._search_selections_with_range.append((start_pos, end_pos, sel))
+
+        self.viewport().update()
+
+    def clear_search_matches(self) -> None:
+        """Clears all search match highlights from the manuscript."""
+        self._search_matches = []
+        self._current_search_match_index = -1
+        self._search_selections_with_range = []
+        self.viewport().update()
+
+    def scroll_to_match(self, match_index: int) -> None:
+        """Centers the viewport on the selected search match and updates active highlight."""
+        if 0 <= match_index < len(self._search_matches):
+            start_pos, end_pos = self._search_matches[match_index]
+            self.scroll_to_position(start_pos)
+            self.set_search_matches(self._search_matches, match_index)
+
+    def show_find(self, replace_mode: bool = False) -> None:
+        """Summons the Find & Replace floating HUD with pre-filled selection if present."""
+        prefill = ""
+        if self._cursor.hasSelection():
+            selected = self._cursor.selectedText().strip()
+            if selected and "\u2029" not in selected and "\n" not in selected and len(selected) <= 100:
+                prefill = selected
+        self.find_replace_bar.show_find(replace_mode=replace_mode, prefill=prefill)
+        self._reposition_find_bar()
+
+    def _reposition_find_bar(self) -> None:
+        """Ensures the floating find bar stays cleanly docked in the upper-right corner."""
+        if not hasattr(self, "find_replace_bar") or not self.find_replace_bar:
+            return
+        vw = self.viewport().width()
+        bw = self.find_replace_bar.width()
+        bh = self.find_replace_bar.sizeHint().height()
+        x = max(16, vw - bw - 24)
+        y = 16
+        self.find_replace_bar.setGeometry(x, y, bw, bh)
 
     # Aliases for QTextEdit / Studio compatibility
     setFontFamily = set_font_family

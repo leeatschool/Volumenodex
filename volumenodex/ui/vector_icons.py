@@ -250,6 +250,32 @@ class VectorIconFactory:
             painter.drawEllipse(QRectF(s * 0.18, s * 0.18, s * 0.44, s * 0.44))
             painter.drawLine(QPointF(s * 0.52, s * 0.52), QPointF(s * 0.82, s * 0.82))
 
+        elif icon_name in ("replace", "swap", "find_replace"):
+            # Two cycling horizontal arrows
+            painter.drawLine(QPointF(s * 0.20, s * 0.35), QPointF(s * 0.72, s * 0.35))
+            painter.drawPolyline([QPointF(s * 0.58, s * 0.22), QPointF(s * 0.75, s * 0.35), QPointF(s * 0.58, s * 0.48)])
+            painter.drawLine(QPointF(s * 0.80, s * 0.65), QPointF(s * 0.28, s * 0.65))
+            painter.drawPolyline([QPointF(s * 0.42, s * 0.52), QPointF(s * 0.25, s * 0.65), QPointF(s * 0.42, s * 0.78)])
+
+        elif icon_name in ("case_sensitive", "match_case"):
+            font = QFont("Segoe UI", int(s * 0.36), QFont.Weight.Bold)
+            painter.setFont(font)
+            painter.drawText(QRectF(s * 0.05, s * 0.15, s * 0.5, s * 0.7), Qt.AlignmentFlag.AlignCenter, "A")
+            font_sm = QFont("Segoe UI", int(s * 0.30), QFont.Weight.Bold)
+            painter.setFont(font_sm)
+            painter.drawText(QRectF(s * 0.48, s * 0.25, s * 0.5, s * 0.7), Qt.AlignmentFlag.AlignCenter, "a")
+
+        elif icon_name in ("whole_word", "match_word"):
+            painter.drawRoundedRect(QRectF(s * 0.12, s * 0.24, s * 0.76, s * 0.52), 2, 2)
+            font = QFont("Segoe UI", int(s * 0.28), QFont.Weight.Bold)
+            painter.setFont(font)
+            painter.drawText(QRectF(s * 0.12, s * 0.22, s * 0.76, s * 0.52), Qt.AlignmentFlag.AlignCenter, "ab")
+
+        elif icon_name in ("regex", "regexp"):
+            font = QFont("Segoe UI", int(s * 0.40), QFont.Weight.Bold)
+            painter.setFont(font)
+            painter.drawText(QRectF(0, 0, s, s), Qt.AlignmentFlag.AlignCenter, ".*")
+
         elif icon_name == "arrow_up":
             painter.drawPolyline([QPointF(s * 0.25, s * 0.62), QPointF(s * 0.50, s * 0.32), QPointF(s * 0.75, s * 0.62)])
 

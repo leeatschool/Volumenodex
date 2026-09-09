@@ -77,6 +77,10 @@ class RibbonBar(QWidget):
     saveCurrentStyleRequested = Signal()
     customStyleSelected = Signal(str)
 
+    # Search & Replace signals
+    findRequested = Signal()
+    replaceRequested = Signal()
+
     # Insert signals
     pageBreakRequested = Signal()
     horizontalRuleRequested = Signal()
@@ -395,6 +399,23 @@ class RibbonBar(QWidget):
 
         styles_group.add_layout(v_styles)
         layout.addWidget(styles_group)
+        layout.addWidget(create_ribbon_separator())
+
+        # 5. Editing Group (Find, Replace)
+        editing_group = ModernRibbonGroup("Editing")
+        v_editing = QVBoxLayout()
+        v_editing.setSpacing(3)
+
+        self.btn_find = self._create_tool_button("search", "Find in document (Ctrl+F)", text="Find", width=80)
+        self.btn_find.clicked.connect(self.findRequested.emit)
+        v_editing.addWidget(self.btn_find)
+
+        self.btn_replace = self._create_tool_button("replace", "Replace in document (Ctrl+H)", text="Replace", width=80)
+        self.btn_replace.clicked.connect(self.replaceRequested.emit)
+        v_editing.addWidget(self.btn_replace)
+
+        editing_group.add_layout(v_editing)
+        layout.addWidget(editing_group)
 
         layout.addStretch()
         self.tab_widget.addTab(tab, "Home")
@@ -772,6 +793,22 @@ class RibbonBar(QWidget):
 
         insp_group.add_layout(h_insp)
         layout.addWidget(insp_group)
+        layout.addWidget(create_ribbon_separator())
+
+        # Find & Replace
+        search_group = ModernRibbonGroup("Search")
+        h_search = QHBoxLayout()
+        h_search.setSpacing(4)
+        btn_find_rev = self._create_tool_button("search", "Find in Document (Ctrl+F)", text="Find", width=80)
+        btn_find_rev.clicked.connect(self.findRequested.emit)
+        h_search.addWidget(btn_find_rev)
+
+        btn_rep_rev = self._create_tool_button("replace", "Find & Replace (Ctrl+H)", text="Replace", width=85)
+        btn_rep_rev.clicked.connect(self.replaceRequested.emit)
+        h_search.addWidget(btn_rep_rev)
+
+        search_group.add_layout(h_search)
+        layout.addWidget(search_group)
 
         layout.addStretch()
         self.tab_widget.addTab(tab, "Review")
