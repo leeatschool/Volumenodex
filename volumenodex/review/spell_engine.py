@@ -8,6 +8,7 @@ for all narrative characters and lore terms created in the Codex.
 import os
 import json
 import re
+import threading
 from typing import List, Set, Dict, Optional, Tuple
 from PySide6.QtGui import QColor
 
@@ -29,9 +30,11 @@ class SpellCheckEngine:
 
     def __init__(self, dict_path: Optional[str] = None):
         self.dict_path = dict_path or self.DEFAULT_DICT_PATH
+        self._lock = threading.RLock()
         self.user_words: Set[str] = set()
         self.session_ignored: Set[str] = set()
         self.story_whitelist: Set[str] = set()
+        self._suggestion_cache: Dict[str, List[str]] = {}
 
         # Initialize spellchecker backend
         if PYSPELLCHECKER_AVAILABLE:
@@ -66,23 +69,31 @@ class SpellCheckEngine:
     def add_to_user_dictionary(self, word: str) -> None:
         """Permanently whitelists a word for this user."""
         w_clean = word.lower().strip()
-        if w_clean and w_clean not in self.user_words:
-            self.user_words.add(w_clean)
-            if self.spell:
-                self.spell.word_frequency.load_words([w_clean])
-            self._save_user_dictionary()
+        if not w_clean:
+            return
+        with self._lock:
+            if w_clean not in self.user_words:
+                self.user_words.add(w_clean)
+                self._suggestion_cache.pop(w_clean, None)
+                if self.spell:
+                    self.spell.word_frequency.load_words([w_clean])
+                self._save_user_dictionary()
 
     def remove_from_user_dictionary(self, word: str) -> None:
         w_clean = word.lower().strip()
-        if w_clean in self.user_words:
-            self.user_words.remove(w_clean)
-            self._save_user_dictionary()
+        with self._lock:
+            if w_clean in self.user_words:
+                self.user_words.remove(w_clean)
+                self._suggestion_cache.pop(w_clean, None)
+                self._save_user_dictionary()
 
     def ignore_word_for_session(self, word: str) -> None:
         """Temporarily ignores a word for the current editing session."""
         w_clean = word.lower().strip()
         if w_clean:
-            self.session_ignored.add(w_clean)
+            with self._lock:
+                self.session_ignored.add(w_clean)
+                self._suggestion_cache.pop(w_clean, None)
 
     def sync_story_codex_whitelist(self, codex_manager) -> None:
         """Whitelists all character names, aliases, and worldbuilding lore terms."""
@@ -107,27 +118,54 @@ class SpellCheckEngine:
                 for token in re.findall(r"\b[a-zA-Z]+\b", alias):
                     new_whitelist.add(token.lower())
 
-        self.story_whitelist = new_whitelist
-        if self.spell and new_whitelist:
-            self.spell.word_frequency.load_words(list(new_whitelist))
+        with self._lock:
+            self.story_whitelist = new_whitelist
+            if self.spell and new_whitelist:
+                self.spell.word_frequency.load_words(list(new_whitelist))
 
     def get_suggestions(self, word: str, limit: int = 5) -> List[str]:
-        """Generates top candidate replacements for a misspelled word."""
-        if not self.spell:
+        """Generates top candidate replacements for a misspelled word with caching."""
+        if not self.spell or not word:
             return []
-        w_lower = word.lower()
-        candidates = list(self.spell.candidates(w_lower) or [])
+        w_lower = word.lower().strip()
+        with self._lock:
+            if w_lower in self._suggestion_cache:
+                candidates = self._suggestion_cache[w_lower]
+            else:
+                try:
+                    candidates = list(self.spell.candidates(w_lower) or [])
+                except Exception:
+                    candidates = []
+                self._suggestion_cache[w_lower] = candidates
+
         # Preserve original capitalization if input was capitalized
         if word.istitle():
-            candidates = [c.capitalize() for c in candidates]
+            res = [c.capitalize() for c in candidates]
         elif word.isupper():
-            candidates = [c.upper() for c in candidates]
-        return candidates[:limit]
+            res = [c.upper() for c in candidates]
+        else:
+            res = list(candidates)
+        return res[:limit]
+
+    def has_cached_suggestions(self, word: str) -> bool:
+        """Returns True if suggestion candidates have already been calculated and cached."""
+        if not word:
+            return False
+        w_lower = word.lower().strip()
+        with self._lock:
+            return w_lower in self._suggestion_cache
 
     def check_text(self, text: str) -> List[LensFinding]:
-        """Scans text and returns structured findings for any spelling errors."""
+        """Scans text and returns structured findings for any spelling errors.
+        
+        Runs in milliseconds by batch-checking unknown tokens and deferring Levenshtein
+        candidate computations until on-demand inspection or right-click.
+        """
         if not text or not self.spell:
             return []
+
+        with self._lock:
+            combined_whitelist = self.user_words | self.session_ignored | self.story_whitelist
 
         findings: List[LensFinding] = []
 
@@ -146,7 +184,7 @@ class SpellCheckEngine:
             w_lower = raw_word.lower()
 
             # Check whitelists
-            if w_lower in self.user_words or w_lower in self.session_ignored or w_lower in self.story_whitelist:
+            if w_lower in combined_whitelist:
                 continue
 
             words_to_check.append((raw_word, match.start(), match.end()))
@@ -155,8 +193,9 @@ class SpellCheckEngine:
         if not unique_tokens:
             return []
 
-        # Batch check unknown words
-        misspelled_set = self.spell.unknown(list(unique_tokens))
+        # High-speed batch lookup of unknown words in frequency dictionary
+        with self._lock:
+            misspelled_set = self.spell.unknown(list(unique_tokens))
 
         if not misspelled_set:
             return []
@@ -164,7 +203,7 @@ class SpellCheckEngine:
         for raw_word, start, end in words_to_check:
             w_lower = raw_word.lower()
             if w_lower in misspelled_set:
-                suggestions = self.get_suggestions(raw_word, limit=4)
+                # Note: suggestions are lazily resolved on demand when right-clicked or inspected
                 s = max(0, start - 30)
                 e = min(len(text), end + 30)
                 prefix = "..." if s > 0 else ""
@@ -178,7 +217,7 @@ class SpellCheckEngine:
                     text=raw_word,
                     color=self.COLOR_SPELLING,
                     message=f"Possible misspelling: '{raw_word}'",
-                    suggestions=suggestions,
+                    suggestions=[],  # Lazily resolved
                     context_snippet=snippet,
                 ))
 

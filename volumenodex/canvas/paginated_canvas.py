@@ -59,6 +59,8 @@ class PaginatedCanvas(QAbstractScrollArea):
         self._is_mouse_selecting = False
         self._lens_findings = []
         self._lens_selections = []
+        self._lens_selections_with_range = []
+        self.spell_engine = None
 
         # Drop shadow caching
         self._cached_shadow: Optional[QPixmap] = None
@@ -259,17 +261,33 @@ class PaginatedCanvas(QAbstractScrollArea):
             # CRITICAL OPTIMIZATION: Tell Qt to cull all blocks outside this page slice in document coordinates!
             ctx.clip = QRectF(0, p * ph_print, pw_print, ph_print)
 
-            selections = []
-            if hasattr(self, "_lens_selections") and self._lens_selections:
-                selections.extend(self._lens_selections)
+            # Spatial selection culling: only pass selections that intersect page p
+            page_selections = []
+            doc_layout = self._doc.documentLayout()
+            p_top_y = p * ph_print
+            p_bot_y = (p + 1) * ph_print
+            p_start_pos = max(0, doc_layout.hitTest(QPointF(0, p_top_y), Qt.HitTestAccuracy.FuzzyHit))
+            p_end_pos = doc_layout.hitTest(QPointF(pw_print, p_bot_y), Qt.HitTestAccuracy.FuzzyHit)
+            if p_end_pos < p_start_pos:
+                p_end_pos = self._doc.characterCount()
+
+            if hasattr(self, "_lens_selections_with_range") and self._lens_selections_with_range:
+                for f_start, f_end, sel in self._lens_selections_with_range:
+                    if not (f_end < p_start_pos or f_start > p_end_pos):
+                        page_selections.append(sel)
+            elif hasattr(self, "_lens_selections") and self._lens_selections:
+                page_selections.extend(self._lens_selections)
 
             if self._cursor.hasSelection():
-                sel = QAbstractTextDocumentLayout.Selection()
-                sel.cursor = self._cursor
-                sel.format.setBackground(QColor(59, 130, 246, 90))
-                selections.append(sel)
+                c_start = self._cursor.selectionStart()
+                c_end = self._cursor.selectionEnd()
+                if not (c_end < p_start_pos or c_start > p_end_pos):
+                    sel = QAbstractTextDocumentLayout.Selection()
+                    sel.cursor = self._cursor
+                    sel.format.setBackground(QColor(59, 130, 246, 90))
+                    page_selections.append(sel)
 
-            ctx.selections = selections
+            ctx.selections = page_selections
 
             self._doc.documentLayout().draw(painter, ctx)
             painter.restore()
@@ -911,11 +929,13 @@ class PaginatedCanvas(QAbstractScrollArea):
         """Configures non-destructive highlighter washes and spellcheck squiggles."""
         self._lens_findings = findings
         self._lens_selections = []
+        self._lens_selections_with_range = []
+        doc_len = self._doc.characterCount()
         for f in findings:
             sel = QAbstractTextDocumentLayout.Selection()
             c = QTextCursor(self._doc)
             c.setPosition(f.start_pos)
-            c.setPosition(min(f.end_pos, self._doc.characterCount() - 1), QTextCursor.MoveMode.KeepAnchor)
+            c.setPosition(min(f.end_pos, doc_len - 1), QTextCursor.MoveMode.KeepAnchor)
             sel.cursor = c
             fmt = QTextCharFormat()
             if getattr(f, "lens_type", "") == "spelling":
@@ -926,6 +946,7 @@ class PaginatedCanvas(QAbstractScrollArea):
                 fmt.setBackground(f.color)
             sel.format = fmt
             self._lens_selections.append(sel)
+            self._lens_selections_with_range.append((f.start_pos, f.end_pos, sel))
         self.viewport().update()
 
     def contextMenuEvent(self, event):
@@ -965,6 +986,10 @@ class PaginatedCanvas(QAbstractScrollArea):
                     break
 
         if spelling_finding:
+            # Lazily resolve suggestions on demand if not yet computed
+            if not spelling_finding.suggestions and getattr(self, "spell_engine", None):
+                spelling_finding.suggestions = self.spell_engine.get_suggestions(spelling_finding.text, limit=4)
+
             # Top candidate suggestions
             if spelling_finding.suggestions:
                 for sug in spelling_finding.suggestions:
@@ -1028,6 +1053,7 @@ class PaginatedCanvas(QAbstractScrollArea):
         """Clears all revision highlights returning canvas to pristine paper."""
         self._lens_findings = []
         self._lens_selections = []
+        self._lens_selections_with_range = []
         self.viewport().update()
 
     def replace_range(self, start_pos: int, end_pos: int, replacement_text: str) -> None:

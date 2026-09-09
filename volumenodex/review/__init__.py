@@ -6,10 +6,14 @@ from volumenodex.review.revision_inspector import (
     FindingCardWidget, RevisionInspectorDrawer
 )
 
+from volumenodex.review.revision_worker import ReviewWorker, ReviewWorkerSignals
+
 __all__ = [
     "LensFinding",
     "RevisionLensEngine",
     "SpellCheckEngine",
     "FindingCardWidget",
     "RevisionInspectorDrawer",
+    "ReviewWorker",
+    "ReviewWorkerSignals",
 ]

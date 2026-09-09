@@ -117,6 +117,16 @@ class RevisionLensEngine:
         re.IGNORECASE
     )
 
+    # Pre-compiled high-speed targeted regexes (replaces slow multi-pass matching)
+    _SOFT_RE_STR = "|".join(re.escape(m) for m in sorted(SOFT_MODIFIERS, key=len, reverse=True))
+    ADVERB_REGEX = re.compile(rf"\b([a-zA-Z]+ly|{_SOFT_RE_STR})\b", re.IGNORECASE)
+
+    _FILLER_RE_STR = "|".join(re.escape(p) for p in sorted(FILLER_PHRASES.keys(), key=len, reverse=True))
+    FILLER_REGEX = re.compile(rf"\b({_FILLER_RE_STR})\b", re.IGNORECASE)
+
+    DIALOGUE_REGEX = re.compile(r'(".*?"|“.*?”|‘.*?’)', re.DOTALL)
+    SENTENCE_REGEX = re.compile(r'([^.!?]+[.!?]+|\S[^.!?]*$)', re.MULTILINE)
+
     # Pastel Highlighter Wash Palettes
     COLOR_ADVERB = QColor(224, 175, 104, 75)      # Soft amber glow
     COLOR_PASSIVE = QColor(247, 118, 142, 75)     # Soft rose glow
@@ -171,12 +181,9 @@ class RevisionLensEngine:
 
     @classmethod
     def _find_adverbs(cls, text: str) -> List[LensFinding]:
-        """Flags -ly adverbs and weak soft modifiers."""
+        """Flags -ly adverbs and weak soft modifiers using fast targeted matching."""
         findings = []
-        # Pattern for words ending in -ly or in soft modifiers
-        pattern = re.compile(r"\b([a-zA-Z]+ly|[a-zA-Z]+)\b", re.IGNORECASE)
-
-        for match in pattern.finditer(text):
+        for match in cls.ADVERB_REGEX.finditer(text):
             word = match.group(1)
             w_lower = word.lower()
 
@@ -224,32 +231,29 @@ class RevisionLensEngine:
 
     @classmethod
     def _find_filler_phrases(cls, text: str) -> List[LensFinding]:
-        """Identifies wordy throat-clearing crutches."""
+        """Identifies wordy throat-clearing crutches in a single unified regex pass."""
         findings = []
-        for phrase, suggestions in cls.FILLER_PHRASES.items():
-            pattern = re.compile(r"\b" + re.escape(phrase) + r"\b", re.IGNORECASE)
-            for match in pattern.finditer(text):
-                matched_text = match.group(0)
-                snippet = cls._extract_snippet(text, match.start(), match.end())
-                findings.append(LensFinding(
-                    lens_type="filler",
-                    start_pos=match.start(),
-                    end_pos=match.end(),
-                    text=matched_text,
-                    color=cls.COLOR_FILLER,
-                    message=f"Wordy crutch phrase '{matched_text}'. Tighten for stronger impact.",
-                    suggestions=suggestions,
-                    context_snippet=snippet,
-                ))
+        for match in cls.FILLER_REGEX.finditer(text):
+            matched_text = match.group(0)
+            suggestions = cls.FILLER_PHRASES.get(matched_text.lower(), ["(remove)"])
+            snippet = cls._extract_snippet(text, match.start(), match.end())
+            findings.append(LensFinding(
+                lens_type="filler",
+                start_pos=match.start(),
+                end_pos=match.end(),
+                text=matched_text,
+                color=cls.COLOR_FILLER,
+                message=f"Wordy crutch phrase '{matched_text}'. Tighten for stronger impact.",
+                suggestions=suggestions,
+                context_snippet=snippet,
+            ))
         return findings
 
     @classmethod
     def _find_dialogue(cls, text: str) -> List[LensFinding]:
         """Isolates dialogue speech inside quotation marks."""
         findings = []
-        # Matches double quotes, curly quotes, and single quotes
-        pattern = re.compile(r'(".*?"|“.*?”|‘.*?’)', re.DOTALL)
-        for match in pattern.finditer(text):
+        for match in cls.DIALOGUE_REGEX.finditer(text):
             quoted = match.group(0)
             snippet = quoted[:60] + ("..." if len(quoted) > 60 else "")
             findings.append(LensFinding(
@@ -268,10 +272,7 @@ class RevisionLensEngine:
     def _analyze_pacing(cls, text: str) -> List[LensFinding]:
         """Evaluates sentence cadence and rhythm variations."""
         findings = []
-        # Match sentences ending with punctuation
-        sentence_pattern = re.compile(r'([^.!?]+[.!?]+|\S[^.!?]*$)', re.MULTILINE)
-
-        for match in sentence_pattern.finditer(text):
+        for match in cls.SENTENCE_REGEX.finditer(text):
             s_text = match.group(0).strip()
             if not s_text:
                 continue

@@ -3,7 +3,7 @@
 import os
 from datetime import datetime
 from typing import Optional
-from PySide6.QtCore import Qt, QTime, QDate, QTimer
+from PySide6.QtCore import Qt, QTime, QDate, QTimer, QThreadPool
 from PySide6.QtGui import (
     QFont, QColor, QTextCursor, QTextBlockFormat, QTextCharFormat,
     QTextListFormat, QAction, QKeySequence, QIcon
@@ -34,6 +34,7 @@ from volumenodex.corkboard import CorkboardManager, CorkboardView, IndexCard
 from volumenodex.story import CodexManager, ChapterNavigatorDrawer, CharacterCodexDrawer
 from volumenodex.story.codex_extractor import CodexExtractionEngine
 from volumenodex.review import RevisionLensEngine, RevisionInspectorDrawer, LensFinding, SpellCheckEngine
+from volumenodex.review.revision_worker import ReviewWorker
 from volumenodex.academic.citation_model import CitationManager, CitationEntry, CitationFormatter
 from volumenodex.academic.citation_drawer import CitationGeneratorDrawer
 from volumenodex.ui.new_document_dialog import NewDocumentDialog
@@ -61,16 +62,17 @@ class MainWindow(QMainWindow):
         self.custom_pets: dict = {}
         self.custom_styles: dict = {}
 
-        # Proofreading & Revision Lenses State
+        # Proofreading & Revision Lenses State (Enabled automatically by default)
         self.active_lenses = {
-            "spelling": False,
-            "adverb": False,
-            "passive": False,
+            "spelling": True,
+            "adverb": True,
+            "passive": True,
             "pacing": False,
-            "filler": False,
+            "filler": True,
             "dialogue": False,
         }
-        self.revision_mode_active = False
+        self.revision_mode_active = True
+        self._revision_request_id = 0
         self._lens_debounce_timer = QTimer(self)
         self._lens_debounce_timer.setSingleShot(True)
         self._lens_debounce_timer.setInterval(300)
@@ -110,6 +112,7 @@ class MainWindow(QMainWindow):
         self._populate_initial_manuscript()
         self._update_metrics()
         self._reposition_pet_dock()
+        self._schedule_revision_analysis()
 
     def _init_ui(self) -> None:
         central_widget = QWidget(self)
@@ -149,6 +152,7 @@ class MainWindow(QMainWindow):
         self.canvas_area = PaginatedCanvas(
             self.layout_model, self.texture_engine, self.theme_manager, center_container
         )
+        self.canvas_area.spell_engine = self.spell_engine
         center_layout.addWidget(self.canvas_area, stretch=1)
         cw_layout.addWidget(center_container, stretch=1)
 
@@ -159,6 +163,7 @@ class MainWindow(QMainWindow):
         self.right_stack.addWidget(self.right_codex)
 
         self.revision_inspector = RevisionInspectorDrawer(self.right_stack)
+        self.revision_inspector.spell_engine = self.spell_engine
         self.right_stack.addWidget(self.revision_inspector)
 
         self.citation_drawer = CitationGeneratorDrawer(self.citation_manager, self.right_stack)
@@ -182,6 +187,13 @@ class MainWindow(QMainWindow):
         # 4. Status Bar
         self.status_bar = VolumenodexStatusBar(self)
         root_layout.addWidget(self.status_bar)
+
+        # Configure initial default active lens buttons on ribbon
+        self.ribbon.btn_rev_mode.setChecked(True)
+        self.ribbon.btn_spell.setChecked(True)
+        self.ribbon.btn_adverbs.setChecked(True)
+        self.ribbon.btn_passive.setChecked(True)
+        self.ribbon.btn_filler.setChecked(True)
 
     def _init_menu_bar(self) -> None:
         menu_bar = self.menuBar()
@@ -556,7 +568,7 @@ class MainWindow(QMainWindow):
 
     def _schedule_revision_analysis(self) -> None:
         if any(self.active_lenses.values()):
-            self._lens_debounce_timer.start()
+            self._lens_debounce_timer.start(300)
 
     def _run_revision_analysis(self) -> None:
         text = self.editor.toPlainText()
@@ -565,14 +577,21 @@ class MainWindow(QMainWindow):
             self.revision_inspector.update_findings([])
             return
 
-        findings = RevisionLensEngine.analyze_document(text, self.active_lenses)
-        if self.active_lenses.get("spelling", False):
-            spelling_findings = self.spell_engine.check_text(text)
-            findings.extend(spelling_findings)
-            findings.sort(key=lambda f: f.start_pos)
+        self._revision_request_id += 1
+        req_id = self._revision_request_id
+        worker = ReviewWorker(
+            text=text,
+            active_lenses=self.active_lenses,
+            spell_engine=self.spell_engine,
+            request_id=req_id,
+        )
+        worker.signals.finished.connect(self._on_revision_worker_finished)
+        QThreadPool.globalInstance().start(worker)
 
-        self.canvas_area.set_lens_findings(findings)
-        self.revision_inspector.update_findings(findings)
+    def _on_revision_worker_finished(self, findings: list, request_id: int) -> None:
+        if request_id == self._revision_request_id:
+            self.canvas_area.set_lens_findings(findings)
+            self.revision_inspector.update_findings(findings)
 
     def _on_add_to_dictionary(self, word: str) -> None:
         self.spell_engine.add_to_user_dictionary(word)
@@ -1029,6 +1048,7 @@ class MainWindow(QMainWindow):
         self.left_navigator.scan_manuscript(self.canvas_area.document())
         self.setWindowTitle(f"Volumenodex — {title}")
         self._update_metrics()
+        self._schedule_revision_analysis()
 
     def _generate_mode_template(self, title: str, mode: DocumentMode) -> str:
         if mode == DocumentMode.ACADEMIC:
@@ -1119,6 +1139,7 @@ class MainWindow(QMainWindow):
             self._check_live_mentions()
             self.setWindowTitle(f"Volumenodex — {os.path.basename(path)}")
             self._update_metrics()
+            self._schedule_revision_analysis()
 
     def save_document(self) -> None:
         if not self.current_file_path:

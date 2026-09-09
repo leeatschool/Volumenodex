@@ -35,9 +35,11 @@ class FindingCardWidget(QFrame):
         "pacing": ("PACING", "#7aa2f7", "rgba(122, 162, 247, 0.15)"),
     }
 
-    def __init__(self, finding: LensFinding, parent=None):
+    def __init__(self, finding: LensFinding, parent=None, spell_engine=None):
         super().__init__(parent)
         self.finding = finding
+        self.spell_engine = spell_engine
+        self.sug_container = None
         self.setObjectName("findingCard")
         self._init_ui()
         self._update_style()
@@ -136,44 +138,103 @@ class FindingCardWidget(QFrame):
         self.lbl_msg.setStyleSheet("color: #787c99; font-size: 10px; font-style: italic;")
         layout.addWidget(self.lbl_msg)
 
-        # 4. Smart Suggestions Row (if any)
+        # 4. Smart Suggestions Row
         if self.finding.suggestions:
-            sug_row = QHBoxLayout()
-            sug_row.setContentsMargins(0, 2, 0, 0)
-            sug_row.setSpacing(4)
+            self._render_suggestion_chips(self.finding.suggestions)
+        elif self.finding.lens_type == "spelling" and self.spell_engine:
+            if self.spell_engine.has_cached_suggestions(self.finding.text):
+                cached = self.spell_engine.get_suggestions(self.finding.text, limit=4)
+                if cached:
+                    self.finding.suggestions = cached
+                    self._render_suggestion_chips(cached)
+                else:
+                    self._render_fetch_suggestions_button()
+            else:
+                self._render_fetch_suggestions_button()
 
-            sug_title = QLabel("Replace:", self)
-            sug_title.setStyleSheet("color: #565f89; font-size: 9px; font-weight: 700;")
-            sug_row.addWidget(sug_title)
+    def _render_suggestion_chips(self, suggestions: List[str]) -> None:
+        if not suggestions:
+            return
+        sug_row = QHBoxLayout()
+        sug_row.setContentsMargins(0, 2, 0, 0)
+        sug_row.setSpacing(4)
 
-            for s in self.finding.suggestions[:4]:
-                chip = QPushButton(s, self)
-                chip.setToolTip(f"Replace '{self.finding.text}' with '{s}'")
-                chip.setStyleSheet("""
-                    QPushButton {
-                        background-color: #16161e;
-                        color: #9ece6a;
-                        border: 1px solid #283b28;
-                        border-radius: 9px;
-                        padding: 1px 7px;
-                        font-size: 10px;
-                        font-weight: 600;
-                    }
-                    QPushButton:hover {
-                        background-color: #243b28;
-                        border-color: #9ece6a;
-                    }
-                """)
-                replacement = "" if s == "(remove)" else s
-                chip.clicked.connect(
-                    lambda _, r=replacement: self.replaceRequested.emit(
-                        self.finding.start_pos, self.finding.end_pos, r
-                    )
+        sug_title = QLabel("Replace:", self)
+        sug_title.setStyleSheet("color: #565f89; font-size: 9px; font-weight: 700;")
+        sug_row.addWidget(sug_title)
+
+        for s in suggestions[:4]:
+            chip = QPushButton(s, self)
+            chip.setToolTip(f"Replace '{self.finding.text}' with '{s}'")
+            chip.setStyleSheet("""
+                QPushButton {
+                    background-color: #16161e;
+                    color: #9ece6a;
+                    border: 1px solid #283b28;
+                    border-radius: 9px;
+                    padding: 1px 7px;
+                    font-size: 10px;
+                    font-weight: 600;
+                }
+                QPushButton:hover {
+                    background-color: #243b28;
+                    border-color: #9ece6a;
+                }
+            """)
+            replacement = "" if s == "(remove)" else s
+            chip.clicked.connect(
+                lambda _, r=replacement: self.replaceRequested.emit(
+                    self.finding.start_pos, self.finding.end_pos, r
                 )
-                sug_row.addWidget(chip)
+            )
+            sug_row.addWidget(chip)
 
-            sug_row.addStretch()
-            layout.addLayout(sug_row)
+        sug_row.addStretch()
+        self.layout().addLayout(sug_row)
+
+    def _render_fetch_suggestions_button(self) -> None:
+        self.sug_container = QWidget(self)
+        sug_row = QHBoxLayout(self.sug_container)
+        sug_row.setContentsMargins(0, 2, 0, 0)
+        sug_row.setSpacing(4)
+
+        btn_fetch = QPushButton("✨ Suggest Corrections", self.sug_container)
+        btn_fetch.setToolTip(f"Calculate smart spelling corrections for '{self.finding.text}'")
+        btn_fetch.setStyleSheet("""
+            QPushButton {
+                background-color: #16161e;
+                color: #7aa2f7;
+                border: 1px solid #292e42;
+                border-radius: 9px;
+                padding: 1px 8px;
+                font-size: 10px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #24283b;
+                border-color: #7aa2f7;
+            }
+        """)
+        btn_fetch.clicked.connect(self._fetch_suggestions_on_demand)
+        sug_row.addWidget(btn_fetch)
+        sug_row.addStretch()
+        self.layout().addWidget(self.sug_container)
+
+    def _fetch_suggestions_on_demand(self) -> None:
+        if not self.spell_engine:
+            return
+        sugs = self.spell_engine.get_suggestions(self.finding.text, limit=4)
+        self.finding.suggestions = sugs
+        if hasattr(self, "sug_container") and self.sug_container:
+            self.sug_container.setParent(None)
+            self.sug_container.deleteLater()
+            self.sug_container = None
+        if sugs:
+            self._render_suggestion_chips(sugs)
+        else:
+            lbl_none = QLabel("No suggestions found", self)
+            lbl_none.setStyleSheet("color: #565f89; font-size: 10px; font-style: italic;")
+            self.layout().addWidget(lbl_none)
 
     def _update_style(self) -> None:
         self.setStyleSheet("""
@@ -206,7 +267,13 @@ class RevisionInspectorDrawer(QWidget):
         self.is_collapsed = False
         self._current_filter = "all"
         self._findings: List[LensFinding] = []
+        self._filtered_findings: List[LensFinding] = []
         self._cards: List[FindingCardWidget] = []
+        self.spell_engine: Optional[Any] = None
+        self._needs_render: bool = False
+        self.PAGE_SIZE: int = 40
+        self._current_page: int = 0
+        self._btn_load_more: Optional[QPushButton] = None
 
         self._init_ui()
         self.setFixedWidth(self.EXPANDED_WIDTH)
@@ -401,6 +468,8 @@ class RevisionInspectorDrawer(QWidget):
         else:
             self.setFixedWidth(self.EXPANDED_WIDTH)
             self.stack.setCurrentIndex(0)
+            if self._needs_render:
+                self._render_cards_page(reset=True)
         self.collapsedChanged.emit(self.is_collapsed)
 
     def set_collapsed(self, collapsed: bool) -> None:
@@ -411,13 +480,7 @@ class RevisionInspectorDrawer(QWidget):
         """Updates the inspector cards list and metrics breakdown."""
         self._findings = findings
 
-        # Clear existing card widgets
-        for c in self._cards:
-            c.setParent(None)
-            c.deleteLater()
-        self._cards.clear()
-
-        # Update metrics summary
+        # Update metrics summary in O(N) (< 1ms)
         counts: Dict[str, int] = {}
         for f in findings:
             counts[f.lens_type] = counts.get(f.lens_type, 0) + 1
@@ -450,31 +513,91 @@ class RevisionInspectorDrawer(QWidget):
         else:
             self.pacing_meter_box.setVisible(False)
 
-        # Populate cards
-        for f in findings:
-            card = FindingCardWidget(f, self.cards_container)
+        # Clear existing card widgets
+        self._clear_cards()
+
+        # If collapsed, defer card widget instantiation until expanded
+        if self.is_collapsed:
+            self._needs_render = True
+            return
+
+        self._render_cards_page(reset=True)
+
+    def _clear_cards(self) -> None:
+        for c in self._cards:
+            c.setParent(None)
+            c.deleteLater()
+        self._cards.clear()
+        if self._btn_load_more is not None:
+            self._btn_load_more.setParent(None)
+            self._btn_load_more.deleteLater()
+            self._btn_load_more = None
+        self._needs_render = False
+
+    def _render_cards_page(self, reset: bool = True) -> None:
+        """Renders findings in batches of PAGE_SIZE to guarantee instant UI response."""
+        if reset:
+            self._clear_cards()
+            self._current_page = 0
+            if self._current_filter == "all":
+                self._filtered_findings = [f for f in self._findings if f.lens_type != "pacing"]
+            else:
+                self._filtered_findings = [f for f in self._findings if f.lens_type == self._current_filter]
+
+        # Remove existing load more button prior to adding new batch
+        if self._btn_load_more is not None:
+            self._btn_load_more.setParent(None)
+            self._btn_load_more.deleteLater()
+            self._btn_load_more = None
+
+        start_idx = self._current_page * self.PAGE_SIZE
+        end_idx = min(len(self._filtered_findings), (self._current_page + 1) * self.PAGE_SIZE)
+
+        for f in self._filtered_findings[start_idx:end_idx]:
+            card = FindingCardWidget(f, self.cards_container, spell_engine=self.spell_engine)
             card.jumpRequested.connect(self.jumpRequested.emit)
             card.replaceRequested.connect(self.replaceRequested.emit)
             card.addToDictionaryRequested.connect(self.addToDictionaryRequested.emit)
             self.cards_layout.insertWidget(self.cards_layout.count() - 1, card)
             self._cards.append(card)
 
-        self._filter_cards(self._current_filter)
+        remaining = len(self._filtered_findings) - end_idx
+        if remaining > 0:
+            self._btn_load_more = QPushButton(f"⬇ Load More ({remaining} remaining)", self.cards_container)
+            self._btn_load_more.setStyleSheet("""
+                QPushButton {
+                    background-color: #1f2335;
+                    color: #7aa2f7;
+                    border: 1px dashed #414868;
+                    border-radius: 6px;
+                    padding: 6px 12px;
+                    font-size: 11px;
+                    font-weight: 600;
+                }
+                QPushButton:hover {
+                    background-color: #24283b;
+                    border-color: #7aa2f7;
+                }
+            """)
+            self._btn_load_more.clicked.connect(self._on_load_more_clicked)
+            self.cards_layout.insertWidget(self.cards_layout.count() - 1, self._btn_load_more)
+
+        self._needs_render = False
+
+    def _on_load_more_clicked(self) -> None:
+        self._current_page += 1
+        self._render_cards_page(reset=False)
 
     def set_filter(self, filter_key: str) -> None:
         """Changes the active filter category and updates filter button states."""
         self._current_filter = filter_key
         for k, btn in self.filter_buttons:
             btn.setChecked(k == filter_key)
-        self._filter_cards(filter_key)
+        if not self.is_collapsed:
+            self._render_cards_page(reset=True)
+        else:
+            self._needs_render = True
         self.filterChanged.emit(filter_key)
 
     def _set_filter(self, filter_key: str) -> None:
         self.set_filter(filter_key)
-
-    def _filter_cards(self, filter_key: str) -> None:
-        for card in self._cards:
-            if filter_key == "all":
-                card.setVisible(card.finding.lens_type != "pacing") # don't overwhelm with all sentences unless pacing chosen
-            else:
-                card.setVisible(card.finding.lens_type == filter_key)
