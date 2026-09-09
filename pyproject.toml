@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "volumenodex"
+version = "0.0.1a1"
+description = "Volumenodex: A native standalone Windows word processing studio with luxury print fidelity and deep narrative tools."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Proprietary"}
+authors = [
+    {name = "Volumenodex Studio"}
+]
+keywords = ["word-processor", "manuscript", "editor", "pyside6", "novel-writing", "academic-citations"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: Microsoft :: Windows",
+    "Topic :: Text Editors :: Word Processors",
+]
+dependencies = [
+    "PySide6>=6.6.0",
+    "python-docx>=1.1.0",
+    "pyspellchecker>=0.8.0",
+]
+
+[project.scripts]
+volumenodex = "main:main"
+
+[tool.setuptools]
+packages = [
+    "volumenodex",
+    "volumenodex.academic",
+    "volumenodex.audio",
+    "volumenodex.canvas",
+    "volumenodex.core",
+    "volumenodex.corkboard",
+    "volumenodex.pet",
+    "volumenodex.review",
+    "volumenodex.story",
+    "volumenodex.ui"
+]
+py-modules = ["main"]
+
+[tool.setuptools.package-data]
+"*" = ["assets/**/*"]

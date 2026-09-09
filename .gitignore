@@ -1,0 +1,36 @@
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# Distribution & Build
+build/
+dist/
+*.egg-info/
+*.egg
+wheels/
+*.spec
+
+# Logs & Runtime
+*.log
+launch.log
+.tempmediaStorage/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+Thumbs.db
+.DS_Store
