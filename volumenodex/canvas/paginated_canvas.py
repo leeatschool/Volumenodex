@@ -3,12 +3,12 @@
 import os
 import math
 from typing import Optional, List, Any
-from PySide6.QtCore import Qt, Signal, QRectF, QPointF, QPoint, QTimer, QSize, QSizeF, QUrl
+from PySide6.QtCore import Qt, Signal, QRectF, QRect, QPointF, QPoint, QTimer, QSize, QSizeF, QUrl
 from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QFont, QTextCursor, QTextDocument,
     QAbstractTextDocumentLayout, QTextCharFormat, QTextBlockFormat,
     QTextListFormat, QKeySequence, QLinearGradient, QRadialGradient,
-    QPainterPath, QClipboard, QGuiApplication, QImage, QTextImageFormat
+    QPainterPath, QClipboard, QGuiApplication, QImage, QTextImageFormat, QPixmap
 )
 from PySide6.QtWidgets import (
     QAbstractScrollArea, QScrollBar, QApplication, QMenu
@@ -60,6 +60,10 @@ class PaginatedCanvas(QAbstractScrollArea):
         self._lens_findings = []
         self._lens_selections = []
 
+        # Drop shadow caching
+        self._cached_shadow: Optional[QPixmap] = None
+        self._cached_shadow_size: Optional[tuple] = None
+
         # Blinking Cursor Timer (500ms)
         self._blink_timer = QTimer(self)
         self._blink_timer.setInterval(500)
@@ -82,6 +86,8 @@ class PaginatedCanvas(QAbstractScrollArea):
 
     def sync_document_geometry(self) -> None:
         """Configures the document page size to match the printable area."""
+        self._cached_shadow = None
+        self._cached_shadow_size = None
         pw_print = self.layout_model.printable_width_px
         ph_print = self.layout_model.printable_height_px
         self._doc.setPageSize(QSizeF(pw_print, ph_print))
@@ -93,10 +99,28 @@ class PaginatedCanvas(QAbstractScrollArea):
         self.textChanged.emit()
         self.viewport().update()
 
+    def _cursor_page_index(self) -> int:
+        block = self._doc.findBlock(self._cursor.position())
+        if not block.isValid():
+            return 0
+        doc_y = self._doc.documentLayout().blockBoundingRect(block).top()
+        ph_print = self.layout_model.printable_height_px
+        return max(0, int(doc_y // ph_print)) if ph_print > 0 else 0
+
     def _toggle_cursor_blink(self) -> None:
         if self.hasFocus():
             self._cursor_visible = not self._cursor_visible
-            self.viewport().update()
+            p_idx = self._cursor_page_index()
+            page_rect = self._get_page_rect(p_idx)
+            sx = self.horizontalScrollBar().value()
+            sy = self.verticalScrollBar().value()
+            dirty_rect = QRect(
+                int(page_rect.x() - sx - 4),
+                int(page_rect.y() - sy - 4),
+                int(page_rect.width() + 8),
+                int(page_rect.height() + 8)
+            )
+            self.viewport().update(dirty_rect)
 
     def _reset_cursor_blink(self) -> None:
         self._cursor_visible = True
@@ -176,7 +200,16 @@ class PaginatedCanvas(QAbstractScrollArea):
 
         texture_pixmap = self.texture_engine.get_texture_pixmap()
 
-        for p in range(total_pages):
+        top_padding = 36
+        gutter = 36
+        ph = self.layout_model.page_height_px
+        page_stride = ph + gutter
+
+        # Direct O(1) page range calculation: only iterate over visible pages
+        start_page = max(0, int((sy - top_padding - ph) // page_stride))
+        end_page = min(total_pages, int((sy + vh - top_padding) // page_stride) + 2)
+
+        for p in range(start_page, end_page):
             page_rect = self._get_page_rect(p)
             # Adjust for scrolling
             screen_page_rect = QRectF(page_rect.x() - sx, page_rect.y() - sy, page_rect.width(), page_rect.height())
@@ -185,7 +218,7 @@ class PaginatedCanvas(QAbstractScrollArea):
             if screen_page_rect.bottom() < 0 or screen_page_rect.top() > vh:
                 continue
 
-            # 2. Photorealistic Multi-Layer Drop Shadow
+            # 2. Photorealistic Multi-Layer Drop Shadow (Hardware-Accelerated Blit)
             self._draw_luxury_page_shadow(painter, screen_page_rect)
 
             # 3. Physical Paper Surface Fill
@@ -223,6 +256,8 @@ class PaginatedCanvas(QAbstractScrollArea):
             # Draw document slice with cursor and selection
             ctx = QAbstractTextDocumentLayout.PaintContext()
             ctx.cursorPosition = self._cursor.position() if (self._cursor_visible and self.hasFocus()) else -1
+            # CRITICAL OPTIMIZATION: Tell Qt to cull all blocks outside this page slice in document coordinates!
+            ctx.clip = QRectF(0, p * ph_print, pw_print, ph_print)
 
             selections = []
             if hasattr(self, "_lens_selections") and self._lens_selections:
@@ -239,23 +274,51 @@ class PaginatedCanvas(QAbstractScrollArea):
             self._doc.documentLayout().draw(painter, ctx)
             painter.restore()
 
-    def _draw_luxury_page_shadow(self, p: QPainter, rect: QRectF) -> None:
-        """Renders realistic multi-stage ambient occlusion and directional paper drop shadow."""
-        p.save()
-        # Stage 1: Soft Ambient Halo (Blur 18px)
+    def _get_cached_shadow(self, pw: int, ph: int) -> QPixmap:
+        """Pre-renders luxury ambient occlusion and drop shadow into a cached QPixmap."""
+        if (
+            self._cached_shadow is not None
+            and self._cached_shadow_size == (pw, ph)
+        ):
+            return self._cached_shadow
+
+        pad = 24
+        pad_bot = 32
+        pix_w = pw + pad * 2
+        pix_h = ph + pad + pad_bot
+        pixmap = QPixmap(pix_w, pix_h)
+        pixmap.fill(Qt.GlobalColor.transparent)
+
+        p = QPainter(pixmap)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        base_rect = QRectF(pad, pad, pw, ph)
+
+        # Stage 1: Soft Ambient Halo
         for i in range(1, 6):
             alpha = int(22 / i)
             p.setPen(QPen(QColor(0, 0, 0, alpha), 3))
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawRoundedRect(rect.adjusted(-i * 2.5, -i * 1.5, i * 2.5, i * 3.5), 3, 3)
+            p.drawRoundedRect(base_rect.adjusted(-i * 2.5, -i * 1.5, i * 2.5, i * 3.5), 3, 3)
 
         # Stage 2: Crisp directional bottom shadow
-        bottom_rect = QRectF(rect.x() + 4, rect.bottom() - 2, rect.width() - 8, 8)
+        bottom_rect = QRectF(base_rect.x() + 4, base_rect.bottom() - 2, base_rect.width() - 8, 8)
         grad = QLinearGradient(bottom_rect.topLeft(), bottom_rect.bottomLeft())
         grad.setColorAt(0.0, QColor(0, 0, 0, 75))
         grad.setColorAt(1.0, QColor(0, 0, 0, 0))
         p.fillRect(bottom_rect, grad)
-        p.restore()
+        p.end()
+
+        self._cached_shadow = pixmap
+        self._cached_shadow_size = (pw, ph)
+        return pixmap
+
+    def _draw_luxury_page_shadow(self, p: QPainter, rect: QRectF) -> None:
+        """Renders realistic multi-stage paper drop shadow via high-speed cached pixmap blit."""
+        pw = int(rect.width())
+        ph = int(rect.height())
+        shadow_pixmap = self._get_cached_shadow(pw, ph)
+        pad = 24
+        p.drawPixmap(int(rect.x() - pad), int(rect.y() - pad), shadow_pixmap)
 
     def _draw_crop_marks(self, p: QPainter, rect: QRectF) -> None:
         """Draws subtle 6px publisher corner crop marks at margin boundaries."""
@@ -336,14 +399,11 @@ class PaginatedCanvas(QAbstractScrollArea):
         ph_print = self.layout_model.printable_height_px
         pw_print = self.layout_model.printable_width_px
 
-        target_page = 0
-        for p in range(total_pages):
-            page_rect = self._get_page_rect(p)
-            if page_rect.top() <= click_y <= page_rect.bottom() + 36:
-                target_page = p
-                break
-            if p == total_pages - 1:
-                target_page = p
+        top_padding = 36
+        gutter = 36
+        ph = self.layout_model.page_height_px
+        page_stride = ph + gutter
+        target_page = max(0, min(total_pages - 1, int((click_y - top_padding) // page_stride)))
 
         print_rect = self._get_printable_rect(target_page)
         doc_x = max(0.0, min(float(pw_print), click_x - print_rect.x()))

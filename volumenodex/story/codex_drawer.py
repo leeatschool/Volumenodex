@@ -215,6 +215,7 @@ class EntityEditDialog(QDialog):
             c.motivation = self.txt_motivation.toPlainText()
             c.secrets = self.txt_secrets.toPlainText()
             c.notes = self.txt_notes.toPlainText()
+            c.is_auto_extracted = False
         else:
             if self.existing_entity:
                 l = self.existing_entity
@@ -227,6 +228,7 @@ class EntityEditDialog(QDialog):
             l.aliases = alias_list
             l.description = self.txt_desc.toPlainText()
             l.notes = self.txt_notes.toPlainText()
+            l.is_auto_extracted = False
 
         self.accept()
 
@@ -283,7 +285,11 @@ class CharacterCardWidget(QFrame):
         self.lbl_name.setStyleSheet("color: #c0caf5; background: transparent; border: none;")
         name_col.addWidget(self.lbl_name)
 
-        # Role badge
+        # Role badge & Auto-Extract tag
+        badges_row = QHBoxLayout()
+        badges_row.setContentsMargins(0, 0, 0, 0)
+        badges_row.setSpacing(4)
+
         role_col = self.ROLE_COLORS.get(self.character.role, "#7aa2f7")
         self.lbl_role = QLabel(self.character.role.upper(), self)
         self.lbl_role.setStyleSheet(f"""
@@ -298,7 +304,26 @@ class CharacterCardWidget(QFrame):
                 letter-spacing: 0.5px;
             }}
         """)
-        name_col.addWidget(self.lbl_role, alignment=Qt.AlignmentFlag.AlignLeft)
+        badges_row.addWidget(self.lbl_role)
+
+        if getattr(self.character, "is_auto_extracted", False):
+            lbl_auto = QLabel("✨ AUTO", self)
+            lbl_auto.setStyleSheet("""
+                QLabel {
+                    color: #e0af68;
+                    background: rgba(224, 175, 104, 0.15);
+                    border: 1px solid rgba(224, 175, 104, 0.35);
+                    border-radius: 4px;
+                    padding: 1px 4px;
+                    font-size: 8px;
+                    font-weight: 700;
+                }
+            """)
+            lbl_auto.setToolTip("Automatically extracted from manuscript")
+            badges_row.addWidget(lbl_auto)
+
+        badges_row.addStretch()
+        name_col.addLayout(badges_row)
         top_row.addLayout(name_col, stretch=1)
 
         # Edit button
@@ -538,6 +563,11 @@ class LoreCardWidget(QFrame):
         self.lbl_title.setStyleSheet("color: #c0caf5; background: transparent; border: none;")
         title_col.addWidget(self.lbl_title)
 
+        # Category badge & Auto-Extract tag
+        badges_row = QHBoxLayout()
+        badges_row.setContentsMargins(0, 0, 0, 0)
+        badges_row.setSpacing(4)
+
         cat_col = self.CATEGORY_COLORS.get(self.lore.category, "#7aa2f7")
         self.lbl_cat = QLabel(self.lore.category.upper(), self)
         self.lbl_cat.setStyleSheet(f"""
@@ -552,7 +582,26 @@ class LoreCardWidget(QFrame):
                 letter-spacing: 0.5px;
             }}
         """)
-        title_col.addWidget(self.lbl_cat, alignment=Qt.AlignmentFlag.AlignLeft)
+        badges_row.addWidget(self.lbl_cat)
+
+        if getattr(self.lore, "is_auto_extracted", False):
+            lbl_auto = QLabel("✨ AUTO", self)
+            lbl_auto.setStyleSheet("""
+                QLabel {
+                    color: #e0af68;
+                    background: rgba(224, 175, 104, 0.15);
+                    border: 1px solid rgba(224, 175, 104, 0.35);
+                    border-radius: 4px;
+                    padding: 1px 4px;
+                    font-size: 8px;
+                    font-weight: 700;
+                }
+            """)
+            lbl_auto.setToolTip("Automatically extracted from manuscript")
+            badges_row.addWidget(lbl_auto)
+
+        badges_row.addStretch()
+        title_col.addLayout(badges_row)
         top_row.addLayout(title_col, stretch=1)
 
         # Edit button
@@ -681,6 +730,7 @@ class CharacterCodexDrawer(QWidget):
     insertTextRequested = Signal(str)
     collapsedChanged = Signal(bool)
     entityUpdated = Signal()
+    autoExtractRequested = Signal()
 
     EXPANDED_WIDTH = 310
     COLLAPSED_WIDTH = 32
@@ -816,6 +866,26 @@ class CharacterCodexDrawer(QWidget):
             }
         """)
         action_bar.addWidget(self.search_filter, stretch=1)
+
+        self.btn_auto_extract = QPushButton("✨ Auto", self.expanded_page)
+        self.btn_auto_extract.setToolTip("Auto-extract characters & lore from manuscript")
+        self.btn_auto_extract.clicked.connect(self.autoExtractRequested.emit)
+        self.btn_auto_extract.setStyleSheet("""
+            QPushButton {
+                background-color: #1f2335;
+                color: #e0af68;
+                border: 1px solid #292e42;
+                border-radius: 4px;
+                padding: 3px 8px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #24283b;
+                border-color: #e0af68;
+            }
+        """)
+        action_bar.addWidget(self.btn_auto_extract)
 
         self.btn_add_entity = QPushButton("+ Add", self.expanded_page)
         self.btn_add_entity.setIcon(VectorIconFactory.create_icon("plus", "#7aa2f7", 12))

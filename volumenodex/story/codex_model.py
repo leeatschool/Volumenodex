@@ -17,6 +17,8 @@ class CharacterProfile:
     notes: str = ""
     icon_type: str = "person"  # corvus, quill, ink, scout, ignis, person, custom
     custom_image_path: Optional[str] = None
+    is_auto_extracted: bool = False
+    mention_count: int = 1
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -34,6 +36,8 @@ class LoreEntry:
     aliases: List[str] = field(default_factory=list)
     description: str = ""
     notes: str = ""
+    is_auto_extracted: bool = False
+    mention_count: int = 1
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -61,10 +65,10 @@ class CodexManager:
         self.characters: List[CharacterProfile] = []
         self.lore_entries: List[LoreEntry] = []
         self.scene_items: List[ChapterSceneItem] = []
-        self._init_defaults()
+        # Starts completely clean and empty
 
-    def _init_defaults(self) -> None:
-        """Initial sample cast corresponding to the initial manuscript."""
+    def init_sample_defaults(self) -> None:
+        """Explicitly load sample cast if requested."""
         sean = CharacterProfile(
             id="char_sean",
             name="Master Sean",

@@ -32,6 +32,7 @@ from volumenodex.pet.companion_figures import CompanionFigureRenderer
 from volumenodex.audio.audio_engine import AudioEngine, TypewriterSoundPreset, AmbientSoundPreset
 from volumenodex.corkboard import CorkboardManager, CorkboardView, IndexCard
 from volumenodex.story import CodexManager, ChapterNavigatorDrawer, CharacterCodexDrawer
+from volumenodex.story.codex_extractor import CodexExtractionEngine
 from volumenodex.review import RevisionLensEngine, RevisionInspectorDrawer, LensFinding, SpellCheckEngine
 from volumenodex.academic.citation_model import CitationManager, CitationEntry, CitationFormatter
 from volumenodex.academic.citation_drawer import CitationGeneratorDrawer
@@ -74,6 +75,22 @@ class MainWindow(QMainWindow):
         self._lens_debounce_timer.setSingleShot(True)
         self._lens_debounce_timer.setInterval(300)
         self._lens_debounce_timer.timeout.connect(self._run_revision_analysis)
+
+        # Performance Debounce Timers (Eliminates typing and multi-page lag)
+        self._metrics_debounce_timer = QTimer(self)
+        self._metrics_debounce_timer.setSingleShot(True)
+        self._metrics_debounce_timer.setInterval(250)
+        self._metrics_debounce_timer.timeout.connect(self._run_debounced_metrics)
+
+        self._mention_debounce_timer = QTimer(self)
+        self._mention_debounce_timer.setSingleShot(True)
+        self._mention_debounce_timer.setInterval(150)
+        self._mention_debounce_timer.timeout.connect(self._check_live_mentions)
+
+        self._codex_extract_timer = QTimer(self)
+        self._codex_extract_timer.setSingleShot(True)
+        self._codex_extract_timer.setInterval(1500)
+        self._codex_extract_timer.timeout.connect(self._run_codex_auto_extract)
 
         # Writing Pet / Scribe Companion Engine
         self.pet_engine = InsightEngine(self)
@@ -341,9 +358,9 @@ class MainWindow(QMainWindow):
         self.ruler.marginsChanged.connect(self._on_ruler_margins_dragged)
         self.canvas_area.pageOffsetChanged.connect(self.ruler.set_page_offset)
 
-        # Text changes & cursor updates
-        ed.textChanged.connect(self._update_metrics)
-        ed.cursorPositionChanged.connect(self._update_ribbon_states)
+        # Text changes & cursor updates (Zero-Latency Debounced Architecture)
+        ed.textChanged.connect(self._on_canvas_text_changed)
+        ed.cursorPositionChanged.connect(self._on_canvas_cursor_changed)
 
         # Writing Pet / Scribe Companion connections
         self.ribbon.btn_pet.clicked.connect(self._toggle_pet_dock)
@@ -352,7 +369,6 @@ class MainWindow(QMainWindow):
         self.pet_dock.breakSettingsRequested.connect(self._open_break_timer_dialog)
         self.pet_dock.dismissRequested.connect(self._on_pet_dock_dismissed)
         self.pet_engine.moodChanged.connect(self._on_pet_mood_changed)
-        ed.textChanged.connect(self._on_text_changed_for_pet)
 
         # Sensory Audio connections
         ed.keystrokeHappened.connect(self.audio_engine.play_keystroke)
@@ -377,6 +393,7 @@ class MainWindow(QMainWindow):
         self.left_navigator.reorderChaptersRequested.connect(self._on_reorder_chapters_requested)
 
         self.right_codex.insertTextRequested.connect(self.canvas_area.insert_text_at_cursor)
+        self.right_codex.autoExtractRequested.connect(self._run_codex_auto_extract_manual)
 
         # Proofreading Lenses, Spell Check & Revision Inspector
         self.ribbon.revisionModeToggled.connect(self._toggle_revision_mode)
@@ -403,11 +420,6 @@ class MainWindow(QMainWindow):
         self.citation_drawer.insertBibliographyRequested.connect(self._on_insert_bibliography)
         self.citation_drawer.collapsedChanged.connect(self._on_citation_collapsed_changed)
         self.citation_drawer.citationUpdated.connect(self._on_citations_changed)
-
-        # Dynamic Outline Scanner, Live Mention Detection & Live Revision Analysis
-        ed.textChanged.connect(lambda: self.left_navigator.request_scan(self.canvas_area.document()))
-        ed.textChanged.connect(self._schedule_revision_analysis)
-        ed.cursorPositionChanged.connect(self._check_live_mentions)
 
     def _on_ribbon_tab_changed(self, index: int) -> None:
         tab_name = self.ribbon.tab_widget.tabText(index)
@@ -596,6 +608,49 @@ class MainWindow(QMainWindow):
         if 0 <= from_idx < len(items) and 0 <= to_idx < len(items):
             items[from_idx], items[to_idx] = items[to_idx], items[from_idx]
             self.left_navigator._rebuild_cards()
+
+    def _on_canvas_text_changed(self) -> None:
+        """Central debounced handler for manuscript typing to guarantee zero latency."""
+        self._metrics_debounce_timer.start(250)
+        self._schedule_revision_analysis()
+        self.left_navigator.request_scan(self.canvas_area.document())
+        if self.document_mode != DocumentMode.ACADEMIC:
+            self._codex_extract_timer.start(1500)
+
+    def _on_canvas_cursor_changed(self) -> None:
+        """Central handler for cursor movements and selection changes."""
+        self._update_ribbon_states()
+        self._mention_debounce_timer.start(150)
+
+    def _run_debounced_metrics(self) -> None:
+        """Runs full document metric analysis and pet insight engine during typing pauses."""
+        self._update_metrics()
+        self._on_text_changed_for_pet()
+
+    def _run_codex_auto_extract(self, manual: bool = False) -> None:
+        """Scans the manuscript for new characters, lore, and mentions to auto-build Story Codex."""
+        if self.document_mode == DocumentMode.ACADEMIC:
+            return
+
+        text = self.editor.toPlainText()
+        res = CodexExtractionEngine.extract_into_manager(text, self.codex_manager)
+        if res.new_characters > 0 or res.new_lore > 0:
+            self.right_codex.refresh()
+            self.spell_engine.sync_story_codex_whitelist(self.codex_manager)
+            parts = []
+            if res.new_characters > 0:
+                parts.append(f"{res.new_characters} character{'s' if res.new_characters > 1 else ''}")
+            if res.new_lore > 0:
+                parts.append(f"{res.new_lore} lore entrit{'ies' if res.new_lore > 1 else 'y'}")
+            summary = " and ".join(parts)
+            self.statusBar().showMessage(f"✨ Story Codex updated: {summary} auto-discovered.", 4000)
+        elif manual:
+            self.statusBar().showMessage(
+                f"Story Codex is up to date ({res.total_characters} characters, {res.total_lore} lore entries).", 3000
+            )
+
+    def _run_codex_auto_extract_manual(self) -> None:
+        self._run_codex_auto_extract(manual=True)
 
     def _check_live_mentions(self) -> None:
         active_text = self.canvas_area.get_active_sentence_or_paragraph()
@@ -1136,16 +1191,7 @@ class MainWindow(QMainWindow):
         )
 
     def _populate_initial_manuscript(self) -> None:
-        sample_text = (
-            "<h1>The Cartographer's Compass</h1>"
-            "<p><b>Chapter One: The Salt and the Stars</b></p>"
-            "<p>The harbor bell chimed three times through the morning sea fog. Across the polished oak desk, the ancient parchment maps lay unfurled, their ink smelling of crushed oak gall and dried cedar. Master Sean adjusted his brass spectacles, observing the fine woven grain of the paper catching the dawn light.</p>"
-            "<p>For forty seasons he had transcribed the royal charts, recording each shoal and sound with absolute fidelity. The kingdom demanded precision—margins measured to the millimeter, seals embossed in crimson wax, and ledgers bound in linen. Yet between the official decrees, in the quiet margins of his ledger, he traced the contours of an uncharted continent.</p>"
-            "<blockquote>\"To write is to build a cathedral out of silence, stone by stone, word by word.\"</blockquote>"
-            "<p>He dipped his quill into the dark inkwell. The paper drank the pigment cleanly, leaving crisp, elegant lines that would outlast empires.</p>"
-        )
-        self.editor.setHtml(sample_text)
+        self.editor.setHtml("<h1>Untitled Document</h1><p></p>")
         self.left_navigator.scan_manuscript(self.canvas_area.document())
         self.right_codex.refresh()
         self.spell_engine.sync_story_codex_whitelist(self.codex_manager)
-        self._check_live_mentions()
