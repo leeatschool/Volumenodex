@@ -187,13 +187,13 @@ class SettingsDialog(QDialog):
         btn_cancel.setStyleSheet("""
             QPushButton {
                 background-color: #24283b;
-                color: #9aa5ce;
+                color: #c0caf5;
                 border: 1px solid #3b4261;
                 border-radius: 6px;
                 padding: 7px 18px;
                 font-weight: 600;
             }
-            QPushButton:hover { background-color: #2e344e; color: #c0caf5; }
+            QPushButton:hover { background-color: #2e344e; color: #ffffff; border-color: #7aa2f7; }
         """)
         btn_cancel.clicked.connect(self.reject)
         btn_layout.addWidget(btn_cancel)

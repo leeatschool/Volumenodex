@@ -698,13 +698,33 @@ class RibbonBar(QWidget):
         # Elements Group
         elem_group = ModernRibbonGroup("Elements")
         h_el = QHBoxLayout()
+        elem_btn_style = """
+            QPushButton {
+                background-color: #20222f;
+                color: #c0caf5;
+                border: 1px solid #323549;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #2a2d3e;
+                border-color: #7aa2f7;
+                color: #ffffff;
+            }
+            QPushButton:pressed {
+                background-color: #7aa2f7;
+                color: #1a1b26;
+            }
+        """
         self.btn_divider = QPushButton("Horizontal Rule")
-        self.btn_divider.setStyleSheet("background: #20222f; border: 1px solid #323549; border-radius: 4px; padding: 6px 12px;")
+        self.btn_divider.setStyleSheet(elem_btn_style)
         self.btn_divider.clicked.connect(self.horizontalRuleRequested.emit)
         h_el.addWidget(self.btn_divider)
 
         self.btn_datetime = QPushButton("Date & Time")
-        self.btn_datetime.setStyleSheet("background: #20222f; border: 1px solid #323549; border-radius: 4px; padding: 6px 12px;")
+        self.btn_datetime.setStyleSheet(elem_btn_style)
         self.btn_datetime.clicked.connect(self.dateTimeRequested.emit)
         h_el.addWidget(self.btn_datetime)
 
@@ -767,22 +787,31 @@ class RibbonBar(QWidget):
         self.texture_combo.currentIndexChanged.connect(lambda: self.textureTypeChanged.emit(self.texture_combo.currentData()))
         h_t1.addWidget(self.texture_combo)
 
-        self.chk_dark_paper = QPushButton("Dark Paper")
-        self.chk_dark_paper.setCheckable(True)
-        self.chk_dark_paper.toggled.connect(self.darkPaperToggled.emit)
-        self.chk_dark_paper.setStyleSheet("""
+        toggle_paper_style = """
             QPushButton {
-                background: #20222f;
+                background-color: #20222f;
+                color: #9aa5ce;
                 border: 1px solid #323549;
                 border-radius: 4px;
                 padding: 4px 8px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #2a2d3e;
+                color: #c0caf5;
+                border-color: #7aa2f7;
             }
             QPushButton:checked {
-                background: rgba(122, 162, 247, 0.2);
+                background-color: rgba(122, 162, 247, 0.22);
                 border: 1px solid #7aa2f7;
                 color: #7aa2f7;
             }
-        """)
+        """
+        self.chk_dark_paper = QPushButton("Dark Paper")
+        self.chk_dark_paper.setCheckable(True)
+        self.chk_dark_paper.toggled.connect(self.darkPaperToggled.emit)
+        self.chk_dark_paper.setStyleSheet(toggle_paper_style)
         h_t1.addWidget(self.chk_dark_paper)
         v_tex.addLayout(h_t1)
 
@@ -801,19 +830,7 @@ class RibbonBar(QWidget):
         self.chk_crop_marks.setCheckable(True)
         self.chk_crop_marks.setChecked(True)
         self.chk_crop_marks.toggled.connect(self.cropMarksToggled.emit)
-        self.chk_crop_marks.setStyleSheet("""
-            QPushButton {
-                background: #20222f;
-                border: 1px solid #323549;
-                border-radius: 4px;
-                padding: 4px 8px;
-            }
-            QPushButton:checked {
-                background: rgba(122, 162, 247, 0.2);
-                border: 1px solid #7aa2f7;
-                color: #7aa2f7;
-            }
-        """)
+        self.chk_crop_marks.setStyleSheet(toggle_paper_style)
         h_t2.addWidget(self.chk_crop_marks)
         v_tex.addLayout(h_t2)
 
@@ -1157,6 +1174,27 @@ class RibbonBar(QWidget):
         self.chk_ruler = QPushButton("Ruler")
         self.chk_ruler.setCheckable(True)
         self.chk_ruler.setChecked(True)
+        self.chk_ruler.setStyleSheet("""
+            QPushButton {
+                background-color: #20222f;
+                color: #9aa5ce;
+                border: 1px solid #323549;
+                border-radius: 4px;
+                padding: 4px 10px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #2a2d3e;
+                color: #c0caf5;
+                border-color: #7aa2f7;
+            }
+            QPushButton:checked {
+                background-color: rgba(122, 162, 247, 0.22);
+                border: 1px solid #7aa2f7;
+                color: #7aa2f7;
+            }
+        """)
         self.chk_ruler.toggled.connect(self.rulerToggled.emit)
         v_d.addWidget(self.chk_ruler)
 

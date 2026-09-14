@@ -64,10 +64,30 @@ class VolumenodexStatusBar(QWidget):
 
         layout.addWidget(self._create_separator())
 
+        zoom_btn_style = """
+            QToolButton {
+                background-color: #1e202e;
+                color: #c0caf5;
+                border: 1px solid #2f334d;
+                border-radius: 3px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QToolButton:hover {
+                background-color: #2a2d3e;
+                color: #7aa2f7;
+                border-color: #7aa2f7;
+            }
+            QToolButton:pressed {
+                background-color: #7aa2f7;
+                color: #101116;
+            }
+        """
         # Right: Zoom Controls
         self.btn_zoom_out = QToolButton()
         self.btn_zoom_out.setText("−")
         self.btn_zoom_out.setFixedSize(18, 18)
+        self.btn_zoom_out.setStyleSheet(zoom_btn_style)
         self.btn_zoom_out.clicked.connect(self._zoom_step_down)
         layout.addWidget(self.btn_zoom_out)
 
@@ -81,6 +101,7 @@ class VolumenodexStatusBar(QWidget):
         self.btn_zoom_in = QToolButton()
         self.btn_zoom_in.setText("+")
         self.btn_zoom_in.setFixedSize(18, 18)
+        self.btn_zoom_in.setStyleSheet(zoom_btn_style)
         self.btn_zoom_in.clicked.connect(self._zoom_step_up)
         layout.addWidget(self.btn_zoom_in)
 

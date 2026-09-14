@@ -62,6 +62,21 @@ class PetSelectionDialog(QDialog):
         h_actions.addStretch()
 
         self.btn_cancel = QPushButton("Cancel")
+        self.btn_cancel.setStyleSheet("""
+            QPushButton {
+                background-color: #24283b;
+                color: #c0caf5;
+                border: 1px solid #3b4261;
+                border-radius: 6px;
+                padding: 6px 16px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #2e344e;
+                color: #ffffff;
+                border-color: #7aa2f7;
+            }
+        """)
         self.btn_cancel.clicked.connect(self.reject)
         h_actions.addWidget(self.btn_cancel)
 
@@ -86,15 +101,20 @@ class PetSelectionDialog(QDialog):
     def _build_roster_tab(self) -> None:
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.setSpacing(12)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
 
-        lbl = QLabel("Select your companion from the studio roster:")
-        lbl.setStyleSheet("color: #a2a7c4; font-size: 12px;")
-        layout.addWidget(lbl)
+        lbl_desc = QLabel("Select your active writing companion. Each figure embodies a unique personality and editorial insight style.")
+        lbl_desc.setWordWrap(True)
+        lbl_desc.setStyleSheet("color: #787c99; font-size: 11px;")
+        layout.addWidget(lbl_desc)
 
-        self.roster_group = QButtonGroup(self)
         grid = QGridLayout()
         grid.setSpacing(10)
+        grid.setContentsMargins(0, 0, 0, 0)
+
+        self.roster_group = QButtonGroup(self)
+        current_id = getattr(self.current_pet, 'id', None)
 
         all_pets = list(DEFAULT_PETS.values()) + list(self.custom_pets.values())
 
@@ -116,7 +136,7 @@ class PetSelectionDialog(QDialog):
             box_layout.setSpacing(8)
 
             radio = QRadioButton()
-            radio.setChecked(pet.id == self.current_pet.id)
+            radio.setChecked(pet.id == current_id)
             self.roster_group.addButton(radio, idx)
             box_layout.addWidget(radio)
 
@@ -191,6 +211,22 @@ class PetSelectionDialog(QDialog):
         h_fig.addWidget(self.combo_figure_base)
 
         self.btn_browse_img = QPushButton("Browse Photo / PNG...")
+        self.btn_browse_img.setStyleSheet("""
+            QPushButton {
+                background-color: #24283b;
+                color: #c0caf5;
+                border: 1px solid #3b4261;
+                border-radius: 5px;
+                padding: 5px 12px;
+                font-weight: 600;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #2e344e;
+                color: #ffffff;
+                border-color: #7aa2f7;
+            }
+        """)
         self.btn_browse_img.clicked.connect(self._browse_custom_image)
         h_fig.addWidget(self.btn_browse_img)
 
@@ -331,6 +367,21 @@ class BreakTimerDialog(QDialog):
         h_btn = QHBoxLayout()
         h_btn.addStretch()
         btn_cancel = QPushButton("Cancel")
+        btn_cancel.setStyleSheet("""
+            QPushButton {
+                background-color: #24283b;
+                color: #c0caf5;
+                border: 1px solid #3b4261;
+                border-radius: 4px;
+                padding: 5px 14px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #2e344e;
+                color: #ffffff;
+                border-color: #7aa2f7;
+            }
+        """)
         btn_cancel.clicked.connect(self.reject)
         h_btn.addWidget(btn_cancel)
 

@@ -19,6 +19,7 @@ class ThemeColors:
     accent_primary: str
     accent_secondary: str
     accent_hover: str
+    accent_text: str
     page_bg_light: str
     page_text_light: str
     page_bg_dark: str
@@ -45,6 +46,7 @@ THEMES: Dict[str, ThemeColors] = {
         accent_primary="#7aa2f7",
         accent_secondary="#bb9af7",
         accent_hover="#89b4fa",
+        accent_text="#101116",
         page_bg_light="#fcfbf7",
         page_text_light="#18181b",
         page_bg_dark="#1c1d28",
@@ -69,6 +71,7 @@ THEMES: Dict[str, ThemeColors] = {
         accent_primary="#d4a373",
         accent_secondary="#e29578",
         accent_hover="#dfab7c",
+        accent_text="#25211d",
         page_bg_light="#faf6ee",
         page_text_light="#2b231c",
         page_bg_dark="#27221d",
@@ -93,6 +96,7 @@ THEMES: Dict[str, ThemeColors] = {
         accent_primary="#0067c0",
         accent_secondary="#625b71",
         accent_hover="#1976d2",
+        accent_text="#ffffff",
         page_bg_light="#ffffff",
         page_text_light="#1a1a1a",
         page_bg_dark="#26282b",
@@ -140,6 +144,83 @@ class ThemeManager:
             font-family: 'Segoe UI', 'SF Pro Text', -apple-system, sans-serif;
             font-size: 13px;
             color: {c.text_primary};
+        }}
+        /* Push Buttons (Standard across Studio, Dialogs & Message Boxes) */
+        QPushButton {{
+            background-color: {c.bg_surface};
+            color: {c.text_primary};
+            border: 1px solid {c.border};
+            border-radius: 5px;
+            padding: 5px 14px;
+            font-weight: 600;
+            font-size: 12px;
+            outline: none;
+        }}
+        QPushButton:hover {{
+            background-color: {c.bg_surface_hover};
+            border: 1px solid {c.accent_primary};
+            color: {c.text_primary};
+        }}
+        QPushButton:pressed, QPushButton:checked {{
+            background-color: {c.bg_surface_active};
+            border: 1px solid {c.accent_primary};
+            color: {c.accent_primary};
+        }}
+        QPushButton:disabled {{
+            background-color: {c.bg_surface};
+            color: {c.text_muted};
+            border: 1px solid {c.border_subtle};
+        }}
+        QPushButton:default, QPushButton#primaryBtn {{
+            background-color: {c.accent_primary};
+            color: {c.accent_text};
+            border: 1px solid {c.accent_primary};
+            font-weight: 700;
+        }}
+        QPushButton:default:hover, QPushButton#primaryBtn:hover {{
+            background-color: {c.accent_hover};
+            border: 1px solid {c.accent_hover};
+            color: {c.accent_text};
+        }}
+        /* Dialog & Message Box Buttons */
+        QMessageBox {{
+            background-color: {c.bg_app};
+            color: {c.text_primary};
+        }}
+        QMessageBox QLabel {{
+            color: {c.text_primary};
+            background-color: transparent;
+            font-size: 13px;
+        }}
+        QMessageBox QPushButton {{
+            min-width: 80px;
+            min-height: 26px;
+            padding: 6px 16px;
+            border-radius: 5px;
+            font-weight: 600;
+            background-color: {c.bg_surface};
+            color: {c.text_primary};
+            border: 1px solid {c.border};
+        }}
+        QMessageBox QPushButton:hover {{
+            background-color: {c.bg_surface_hover};
+            border: 1px solid {c.accent_primary};
+            color: {c.text_primary};
+        }}
+        QMessageBox QPushButton:default {{
+            background-color: {c.accent_primary};
+            color: {c.accent_text};
+            border: 1px solid {c.accent_primary};
+            font-weight: 700;
+        }}
+        QMessageBox QPushButton:default:hover {{
+            background-color: {c.accent_hover};
+            border: 1px solid {c.accent_hover};
+            color: {c.accent_text};
+        }}
+        QDialogButtonBox QPushButton {{
+            min-width: 80px;
+            padding: 6px 16px;
         }}
         QMenuBar {{
             background-color: {c.bg_surface};

@@ -149,12 +149,39 @@ class EntityEditDialog(QDialog):
         btn_layout.addStretch()
 
         self.btn_cancel = QPushButton("Cancel", self)
-        self.btn_cancel.setStyleSheet("background-color: #1f2335; color: #787c99; border: 1px solid #292e42;")
+        self.btn_cancel.setStyleSheet("""
+            QPushButton {
+                background-color: #24283b;
+                color: #c0caf5;
+                border: 1px solid #3b4261;
+                border-radius: 5px;
+                padding: 6px 16px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #2e344e;
+                color: #ffffff;
+                border-color: #7aa2f7;
+            }
+        """)
         self.btn_cancel.clicked.connect(self.reject)
         btn_layout.addWidget(self.btn_cancel)
 
         self.btn_save = QPushButton("Save Entry", self)
-        self.btn_save.setStyleSheet("background-color: #7aa2f7; color: #16161e; font-weight: bold;")
+        self.btn_save.setStyleSheet("""
+            QPushButton {
+                background-color: #7aa2f7;
+                color: #101116;
+                font-weight: bold;
+                border: 1px solid #7aa2f7;
+                border-radius: 5px;
+                padding: 6px 18px;
+            }
+            QPushButton:hover {
+                background-color: #89b4fa;
+                border-color: #89b4fa;
+            }
+        """)
         self.btn_save.clicked.connect(self._save_and_accept)
         btn_layout.addWidget(self.btn_save)
 

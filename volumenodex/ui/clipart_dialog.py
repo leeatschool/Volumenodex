@@ -56,25 +56,36 @@ class ClipArtDialog(QDialog):
             }
             QPushButton {
                 background-color: #24283b;
-                border: 1px solid #292e42;
+                border: 1px solid #3b4261;
                 border-radius: 6px;
                 padding: 6px 14px;
                 color: #c0caf5;
-                font-weight: 500;
+                font-weight: 600;
             }
             QPushButton:hover {
                 background-color: #2e344e;
                 border: 1px solid #7aa2f7;
-                color: #7aa2f7;
+                color: #ffffff;
+            }
+            QPushButton:disabled {
+                background-color: #1a1b26;
+                color: #565f89;
+                border: 1px solid #292e42;
             }
             QPushButton#primaryBtn {
                 background-color: #7aa2f7;
-                color: #1a1b26;
+                color: #101116;
                 font-weight: bold;
-                border: none;
+                border: 1px solid #7aa2f7;
             }
             QPushButton#primaryBtn:hover {
                 background-color: #89b4fa;
+                border-color: #89b4fa;
+            }
+            QPushButton#primaryBtn:disabled {
+                background-color: #24283b;
+                color: #565f89;
+                border: 1px solid #292e42;
             }
         """)
 

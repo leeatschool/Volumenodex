@@ -52,10 +52,18 @@ class CitationEditDialog(QDialog):
                 border-color: #7aa2f7;
             }
             QPushButton {
+                background-color: #24283b;
+                color: #c0caf5;
+                border: 1px solid #3b4261;
                 border-radius: 5px;
                 padding: 6px 14px;
                 font-weight: 600;
                 font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #2e344e;
+                border-color: #7aa2f7;
+                color: #ffffff;
             }
         """)
 
@@ -180,12 +188,39 @@ class CitationEditDialog(QDialog):
         btn_layout.addStretch()
 
         btn_cancel = QPushButton("Cancel")
-        btn_cancel.setStyleSheet("background-color: #24283b; color: #9aa5ce; border: 1px solid #3b4261;")
+        btn_cancel.setStyleSheet("""
+            QPushButton {
+                background-color: #24283b;
+                color: #c0caf5;
+                border: 1px solid #3b4261;
+                border-radius: 5px;
+                padding: 6px 14px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #2e344e;
+                color: #ffffff;
+                border-color: #7aa2f7;
+            }
+        """)
         btn_cancel.clicked.connect(self.reject)
         btn_layout.addWidget(btn_cancel)
 
         btn_save = QPushButton("Save Citation")
-        btn_save.setStyleSheet("background-color: #7aa2f7; color: #1a1b26;")
+        btn_save.setStyleSheet("""
+            QPushButton {
+                background-color: #7aa2f7;
+                color: #101116;
+                font-weight: bold;
+                border: 1px solid #7aa2f7;
+                border-radius: 5px;
+                padding: 6px 16px;
+            }
+            QPushButton:hover {
+                background-color: #89b4fa;
+                border-color: #89b4fa;
+            }
+        """)
         btn_save.clicked.connect(self._on_save)
         btn_layout.addWidget(btn_save)
 
@@ -305,21 +340,32 @@ class CitationCardWidget(QFrame):
         lbl_head.setStyleSheet("color: #c0caf5; font-size: 11px;")
         top_row.addWidget(lbl_head, stretch=1)
 
+        card_action_btn_style = """
+            QToolButton {
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: 3px;
+            }
+            QToolButton:hover {
+                background: #2e344e;
+                border-color: #7aa2f7;
+            }
+        """
         # Edit button
         btn_edit = QToolButton()
-        btn_edit.setIcon(VectorIconFactory.create_icon("settings", "#787c99", 12))
-        btn_edit.setFixedSize(18, 18)
+        btn_edit.setIcon(VectorIconFactory.create_icon("settings", "#a2a7c4", 12))
+        btn_edit.setFixedSize(20, 20)
         btn_edit.setToolTip("Edit citation")
-        btn_edit.setStyleSheet("background: transparent; border: none;")
+        btn_edit.setStyleSheet(card_action_btn_style)
         btn_edit.clicked.connect(lambda: self.editRequested.emit(self.citation.id))
         top_row.addWidget(btn_edit)
 
         # Delete button
         btn_del = QToolButton()
-        btn_del.setIcon(VectorIconFactory.create_icon("close", "#787c99", 12))
-        btn_del.setFixedSize(18, 18)
+        btn_del.setIcon(VectorIconFactory.create_icon("close", "#f7768e", 12))
+        btn_del.setFixedSize(20, 20)
         btn_del.setToolTip("Delete citation")
-        btn_del.setStyleSheet("background: transparent; border: none;")
+        btn_del.setStyleSheet(card_action_btn_style)
         btn_del.clicked.connect(lambda: self.deleteRequested.emit(self.citation.id))
         top_row.addWidget(btn_del)
 

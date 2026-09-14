@@ -113,10 +113,25 @@ class IndexCardWidget(QFrame):
         h_bot.addStretch()
 
         if self.card.is_linked:
+            card_btn_style = """
+                QToolButton {
+                    color: #1a1b26;
+                    background-color: rgba(0, 0, 0, 0.08);
+                    border: 1px solid rgba(0, 0, 0, 0.25);
+                    border-radius: 3px;
+                    font-size: 10px;
+                    font-weight: 600;
+                }
+                QToolButton:hover {
+                    background-color: rgba(0, 0, 0, 0.18);
+                    color: #000000;
+                    border-color: rgba(0, 0, 0, 0.4);
+                }
+            """
             self.btn_jump = QToolButton()
             self.btn_jump.setText("↗ Open")
             self.btn_jump.setToolTip("Jump to section in manuscript")
-            self.btn_jump.setStyleSheet("font-size: 10px; border: 1px solid rgba(0,0,0,0.2); border-radius: 3px; padding: 1px 4px;")
+            self.btn_jump.setStyleSheet(card_btn_style + "padding: 1px 6px;")
             self.btn_jump.clicked.connect(lambda: self.jumpToManuscriptRequested.emit(self.card))
             h_bot.addWidget(self.btn_jump)
 
@@ -124,7 +139,7 @@ class IndexCardWidget(QFrame):
             self.btn_up.setText("◀")
             self.btn_up.setToolTip("Move Earlier in Manuscript")
             self.btn_up.setFixedSize(20, 18)
-            self.btn_up.setStyleSheet("border: 1px solid rgba(0,0,0,0.15); border-radius: 2px;")
+            self.btn_up.setStyleSheet(card_btn_style)
             self.btn_up.clicked.connect(lambda: self.moveUpRequested.emit(self.card))
             h_bot.addWidget(self.btn_up)
 
@@ -132,7 +147,7 @@ class IndexCardWidget(QFrame):
             self.btn_down.setText("▶")
             self.btn_down.setToolTip("Move Later in Manuscript")
             self.btn_down.setFixedSize(20, 18)
-            self.btn_down.setStyleSheet("border: 1px solid rgba(0,0,0,0.15); border-radius: 2px;")
+            self.btn_down.setStyleSheet(card_btn_style)
             self.btn_down.clicked.connect(lambda: self.moveDownRequested.emit(self.card))
             h_bot.addWidget(self.btn_down)
         else:
@@ -140,7 +155,20 @@ class IndexCardWidget(QFrame):
             self.btn_del.setText("🗑")
             self.btn_del.setToolTip("Delete Scratch Card")
             self.btn_del.setFixedSize(20, 18)
-            self.btn_del.setStyleSheet("border: 1px solid rgba(0,0,0,0.15); border-radius: 2px;")
+            self.btn_del.setStyleSheet("""
+                QToolButton {
+                    color: #a32238;
+                    background-color: rgba(0, 0, 0, 0.08);
+                    border: 1px solid rgba(0, 0, 0, 0.25);
+                    border-radius: 3px;
+                    font-size: 10px;
+                }
+                QToolButton:hover {
+                    background-color: rgba(197, 59, 83, 0.2);
+                    color: #7a1525;
+                    border-color: #a32238;
+                }
+            """)
             self.btn_del.clicked.connect(lambda: self.deleteRequested.emit(self.card))
             h_bot.addWidget(self.btn_del)
 
@@ -299,10 +327,32 @@ class CorkboardView(QWidget):
         h.addSpacing(16)
 
         # View Mode Toggle: Linked Scenes vs Idea Scratchpad
+        cork_toggle_style = """
+            QToolButton {
+                background-color: #24273a;
+                color: #9aa5ce;
+                border: 1px solid #3b3e58;
+                border-radius: 6px;
+                padding: 5px 12px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QToolButton:hover {
+                background-color: #2f334d;
+                color: #c0caf5;
+                border-color: #7aa2f7;
+            }
+            QToolButton:checked {
+                background-color: rgba(122, 162, 247, 0.22);
+                color: #7aa2f7;
+                border: 1px solid #7aa2f7;
+            }
+        """
         self.btn_view_linked = QToolButton()
         self.btn_view_linked.setText("📌 Manuscript Scene Cards")
         self.btn_view_linked.setCheckable(True)
         self.btn_view_linked.setChecked(True)
+        self.btn_view_linked.setStyleSheet(cork_toggle_style)
         self.btn_view_linked.clicked.connect(lambda: self._switch_tab(0))
         h.addWidget(self.btn_view_linked)
 
@@ -310,6 +360,7 @@ class CorkboardView(QWidget):
         self.btn_view_scratch.setText("💡 Idea Scratchpad")
         self.btn_view_scratch.setCheckable(True)
         self.btn_view_scratch.setChecked(False)
+        self.btn_view_scratch.setStyleSheet(cork_toggle_style)
         self.btn_view_scratch.clicked.connect(lambda: self._switch_tab(1))
         h.addWidget(self.btn_view_scratch)
 
