@@ -940,8 +940,10 @@ class StandaloneReferenceBuilderApp(QWidget):
             self._render_table()
             self.lbl_count.setText(f"✓ Saved '{topic_dict.get('title')}'! Total: {len(self.topics)} Topics")
 
-    def _open_pdf_ingestor(self) -> None:
+    def _open_pdf_ingestor(self, initial_pdf_path: Optional[str] = None) -> None:
         dlg = PDFIngestionDialog(target_json_path=self.target_path, parent=self)
+        if initial_pdf_path and os.path.exists(initial_pdf_path):
+            dlg.edit_pdf_path.setText(str(initial_pdf_path))
         dlg.entriesIngested.connect(self._on_pdf_entries_ingested)
         dlg.exec()
 
@@ -1024,6 +1026,7 @@ def main():
     parser.add_argument("--pdf-mode", choices=["auto", "toc", "headings", "lexicon"], default="auto", help="PDF parsing strategy (default: auto)")
     parser.add_argument("--pdf-category", choices=ReferenceCategory.ALL_CATEGORIES, default=None, help="Override category classification")
     parser.add_argument("--min-words", type=int, default=40, help="Minimum word count per article")
+    parser.add_argument("pdf_file", nargs="?", default=None, help="Optional PDF file to open in the visual Ingestion Dialog")
 
     args = parser.parse_args()
     target_path = Path(args.file)
@@ -1119,6 +1122,8 @@ def main():
     app = QApplication.instance() or QApplication(sys.argv)
     win = StandaloneReferenceBuilderApp(target_json_path=str(target_path))
     win.show()
+    if args.pdf_file and os.path.exists(args.pdf_file):
+        win._open_pdf_ingestor(initial_pdf_path=args.pdf_file)
     sys.exit(app.exec())
 
 

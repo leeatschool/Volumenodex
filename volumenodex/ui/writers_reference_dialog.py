@@ -333,6 +333,16 @@ class WritersReferenceDialog(QDialog):
         h_actions.addWidget(self.btn_copy_facts)
 
         h_actions.addStretch()
+
+        self.btn_refresh = QPushButton("🔄 Reload")
+        self.btn_refresh.setToolTip("Reload knowledge base from disk")
+        self.btn_refresh.clicked.connect(self._reload_and_refresh)
+        h_actions.addWidget(self.btn_refresh)
+
+        self.btn_builder = QPushButton("⚡ Launch Knowledge Builder")
+        self.btn_builder.setToolTip("Open the external Knowledge Builder and PDF Ingestor")
+        self.btn_builder.clicked.connect(self._launch_external_builder)
+        h_actions.addWidget(self.btn_builder)
         v_right.addLayout(h_actions)
 
         # Reader Browser
@@ -690,3 +700,29 @@ class WritersReferenceDialog(QDialog):
         self.btn_copy_facts.setText("✓ Copied to Clipboard!")
         from PySide6.QtCore import QTimer
         QTimer.singleShot(1800, lambda: self.btn_copy_facts.setText(orig_text))
+
+    def _launch_external_builder(self) -> None:
+        """Launches the external Standalone Writers Reference Builder as an independent process."""
+        import sys
+        import subprocess
+        from pathlib import Path
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        builder_script = repo_root / "tools" / "reference_builder.py"
+        py_exe = sys.executable
+        if os.name == "nt" and py_exe.lower().endswith("python.exe"):
+            pyw = py_exe[:-10] + "pythonw.exe"
+            if os.path.exists(pyw):
+                py_exe = pyw
+        try:
+            subprocess.Popen([py_exe, str(builder_script)], cwd=str(repo_root))
+        except Exception as e:
+            QMessageBox.warning(self, "Launch Error", f"Could not launch Knowledge Builder:\n{e}")
+
+    def _reload_and_refresh(self) -> None:
+        """Reloads knowledge base from disk and updates current results view."""
+        self.manager.reload()
+        self._refresh_results()
+        orig_text = self.btn_refresh.text()
+        self.btn_refresh.setText("✓ Reloaded!")
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(1500, lambda: self.btn_refresh.setText(orig_text))
