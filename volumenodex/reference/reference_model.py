@@ -10,10 +10,17 @@ class ReferenceCategory:
     WEAPONS_WARFARE = "Weapons & Warfare"
     POISONS_MEDICINE = "Poisons & Medicine"
     HIERARCHY_NOBILITY = "Hierarchy & Nobility"
+    HERALDRY_CHIVALRY = "Heraldry & Chivalry"
     NAUTICAL_SAILING = "Nautical & Sailing"
-    BODY_LANGUAGE = "Sensory & Body Language"
-    FORENSICS_CRIME = "Forensics & Crime"
+    AVIATION_FLIGHT = "Aviation & Flight"
+    ASTRONOMY_SPACE = "Astronomy & Cosmos"
+    EARTH_METALS_MACHINES = "Earth, Metals & Machines"
     WILDERNESS_SURVIVAL = "Wilderness & Survival"
+    FORENSICS_CRIME = "Forensics & Crime"
+    SLANG_CANT_DIALECT = "Slang, Cant & Dialect"
+    MYTH_FOLKLORE = "Mythology & Folklore"
+    STORY_DRAMATURGY = "Story & Dramaturgy"
+    BODY_LANGUAGE = "Sensory & Body Language"
     CASTLES_ARCHITECTURE = "Castles & Architecture"
     ARCHAIC_UNITS_TIME = "Archaic Units & Time"
     CUSTOM_LORE = "Custom Author Lore"
@@ -22,10 +29,17 @@ class ReferenceCategory:
         WEAPONS_WARFARE,
         POISONS_MEDICINE,
         HIERARCHY_NOBILITY,
+        HERALDRY_CHIVALRY,
         NAUTICAL_SAILING,
-        BODY_LANGUAGE,
-        FORENSICS_CRIME,
+        AVIATION_FLIGHT,
+        ASTRONOMY_SPACE,
+        EARTH_METALS_MACHINES,
         WILDERNESS_SURVIVAL,
+        FORENSICS_CRIME,
+        SLANG_CANT_DIALECT,
+        MYTH_FOLKLORE,
+        STORY_DRAMATURGY,
+        BODY_LANGUAGE,
         CASTLES_ARCHITECTURE,
         ARCHAIC_UNITS_TIME,
         CUSTOM_LORE,

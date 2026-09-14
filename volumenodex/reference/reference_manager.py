@@ -11,9 +11,9 @@ from volumenodex.reference.reference_model import ReferenceEntry, ReferenceCateg
 class ReferenceManager:
     """Manages the bundled offline encyclopedia and user-created custom reference entries."""
 
-    def __init__(self, user_storage_dir: Optional[str] = None):
+    def __init__(self, user_storage_dir: Optional[str] = None, bundled_path: Optional[str] = None):
         self._entries: Dict[str, ReferenceEntry] = {}
-        self._bundled_path = os.path.join(os.path.dirname(__file__), "bundled_knowledge.json")
+        self._bundled_path = bundled_path if bundled_path is not None else os.path.join(os.path.dirname(__file__), "bundled_knowledge.json")
 
         if user_storage_dir:
             self._storage_dir = Path(user_storage_dir)

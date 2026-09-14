@@ -60,10 +60,23 @@ def test_reference_entry_model():
     assert score_none == 0
 
 
+def test_reference_manager_bundled_corpus():
+    rm = ReferenceManager()
+    assert rm.total_count == 82
+    # Verify search over bundled knowledge
+    results = rm.search("triage")
+    assert len(results) >= 1
+    assert any("Triage" in r.title for r in results)
+
+    # Verify category filtering
+    tactics = rm.search(category=ReferenceCategory.WEAPONS_WARFARE)
+    assert len(tactics) >= 4
+
+
 def test_reference_manager_empty_and_custom_entries():
     with tempfile.TemporaryDirectory() as tmpdir:
-        rm = ReferenceManager(user_storage_dir=tmpdir)
-        # Bundled knowledge is purged clean
+        empty_bundled = os.path.join(tmpdir, "empty_bundled.json")
+        rm = ReferenceManager(user_storage_dir=tmpdir, bundled_path=empty_bundled)
         assert rm.total_count == 0
 
         custom_entry = ReferenceEntry(
@@ -93,7 +106,7 @@ def test_reference_manager_empty_and_custom_entries():
         assert len(results_cat) == 1
 
         # Persistence across reloads
-        rm2 = ReferenceManager(user_storage_dir=tmpdir)
+        rm2 = ReferenceManager(user_storage_dir=tmpdir, bundled_path=empty_bundled)
         assert rm2.total_count == 1
         loaded = rm2.get_entry("custom-magic-poison")
         assert loaded is not None
@@ -107,7 +120,8 @@ def test_reference_manager_empty_and_custom_entries():
 
 def test_reference_manager_import_export():
     with tempfile.TemporaryDirectory() as tmpdir:
-        rm = ReferenceManager(user_storage_dir=tmpdir)
+        empty_bundled = os.path.join(tmpdir, "empty_bundled.json")
+        rm = ReferenceManager(user_storage_dir=tmpdir, bundled_path=empty_bundled)
         entry = ReferenceEntry(
             id="test-topic-1",
             title="Test Topic",
@@ -124,7 +138,7 @@ def test_reference_manager_import_export():
 
         # Import into separate manager
         with tempfile.TemporaryDirectory() as tmpdir2:
-            rm2 = ReferenceManager(user_storage_dir=tmpdir2)
+            rm2 = ReferenceManager(user_storage_dir=tmpdir2, bundled_path=empty_bundled)
             imported_count = rm2.import_from_json(export_file)
             assert imported_count == 1
             assert rm2.total_count == 1
@@ -132,7 +146,8 @@ def test_reference_manager_import_export():
 
 def test_writers_reference_dialog_ui(app):
     with tempfile.TemporaryDirectory() as tmpdir:
-        rm = ReferenceManager(user_storage_dir=tmpdir)
+        empty_bundled = os.path.join(tmpdir, "empty_bundled.json")
+        rm = ReferenceManager(user_storage_dir=tmpdir, bundled_path=empty_bundled)
         # Empty state
         dlg = WritersReferenceDialog(manager=rm)
         assert dlg.lbl_logo.pixmap() is not None
