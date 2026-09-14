@@ -6,7 +6,7 @@ from typing import Optional
 from PySide6.QtCore import Qt, QTime, QDate, QTimer, QThreadPool
 from PySide6.QtGui import (
     QFont, QColor, QTextCursor, QTextBlockFormat, QTextCharFormat,
-    QTextListFormat, QAction, QKeySequence, QIcon
+    QTextListFormat, QAction, QKeySequence, QIcon, QCloseEvent, QActionGroup
 )
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFileDialog,
@@ -39,6 +39,8 @@ from volumenodex.academic.citation_model import CitationManager, CitationEntry, 
 from volumenodex.academic.citation_drawer import CitationGeneratorDrawer
 from volumenodex.ui.new_document_dialog import NewDocumentDialog
 from volumenodex.ui.clipart_dialog import ClipArtDialog
+from volumenodex.core.settings_manager import SettingsManager
+from volumenodex.ui.settings_dialog import SettingsDialog
 
 
 class MainWindow(QMainWindow):
@@ -100,6 +102,12 @@ class MainWindow(QMainWindow):
         # Sensory Audio Engine
         self.audio_engine = AudioEngine(parent=self)
 
+        # Settings and Variable Auto-Save
+        self.settings_manager = SettingsManager(self)
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.timeout.connect(self._on_autosave_timer)
+        self.settings_manager.settingsChanged.connect(self._apply_autosave_settings)
+
         # Apply global theme stylesheet
         self.setStyleSheet(self.theme_manager.generate_qss())
 
@@ -107,6 +115,7 @@ class MainWindow(QMainWindow):
         self._init_ui()
         self._init_menu_bar()
         self._connect_signals()
+        self._apply_autosave_settings()
 
         # Initial Document Content & Metrics
         self._populate_initial_manuscript()
@@ -322,6 +331,42 @@ class MainWindow(QMainWindow):
         act_insp.triggered.connect(self._toggle_inspector_panel)
         view_menu.addAction(act_insp)
 
+        # Settings Menu
+        settings_menu = menu_bar.addMenu("&Settings")
+
+        # Variable Auto-Save Submenu
+        self.menu_autosave = settings_menu.addMenu("Auto-&Save Frequency")
+        self.act_autosave_enable = QAction("Enable Auto-Save", self)
+        self.act_autosave_enable.setCheckable(True)
+        self.act_autosave_enable.setChecked(self.settings_manager.autosave_enabled)
+        self.act_autosave_enable.toggled.connect(self._on_menu_autosave_toggled)
+        self.menu_autosave.addAction(self.act_autosave_enable)
+        self.menu_autosave.addSeparator()
+
+        self.autosave_action_group = QActionGroup(self)
+        self.autosave_action_group.setExclusive(True)
+        self._autosave_interval_actions = {}
+        for minutes in [1, 2, 5, 10, 15, 30]:
+            label = f"Every {minutes} Minute" if minutes == 1 else f"Every {minutes} Minutes"
+            if minutes == 2:
+                label += " (Default)"
+            act = QAction(label, self)
+            act.setCheckable(True)
+            act.setData(minutes)
+            if minutes == self.settings_manager.autosave_interval_minutes:
+                act.setChecked(True)
+            act.triggered.connect(lambda checked=False, m=minutes: self._on_menu_autosave_interval_triggered(m))
+            self.autosave_action_group.addAction(act)
+            self.menu_autosave.addAction(act)
+            self._autosave_interval_actions[minutes] = act
+
+        settings_menu.addSeparator()
+
+        act_prefs = QAction("Studio Preferences...", self)
+        act_prefs.setShortcut(QKeySequence("Ctrl+,"))
+        act_prefs.triggered.connect(self._show_settings_dialog)
+        settings_menu.addAction(act_prefs)
+
         # Help Menu
         help_menu = menu_bar.addMenu("&Help")
         act_about = QAction("About Volumenodex", self)
@@ -458,6 +503,13 @@ class MainWindow(QMainWindow):
         self.citation_drawer.insertBibliographyRequested.connect(self._on_insert_bibliography)
         self.citation_drawer.collapsedChanged.connect(self._on_citation_collapsed_changed)
         self.citation_drawer.citationUpdated.connect(self._on_citations_changed)
+
+        # Ribbon Header Actions (Save & Settings)
+        self.ribbon.saveRequested.connect(self.save_document)
+        self.ribbon.settingsRequested.connect(self._show_settings_dialog)
+
+        # Document Modification Tracking for Title and Save Prompts
+        self.editor.document().modificationChanged.connect(self._on_modification_changed)
 
     def _on_ribbon_tab_changed(self, index: int) -> None:
         tab_name = self.ribbon.tab_widget.tabText(index)
@@ -1061,6 +1113,9 @@ class MainWindow(QMainWindow):
 
     # --- File IO Handlers ---
     def new_document(self) -> None:
+        if not self._maybe_save_prompt():
+            return
+
         confirmed, title, mode, use_template = NewDocumentDialog.prompt_new_document(self)
         if not confirmed:
             return
@@ -1082,18 +1137,18 @@ class MainWindow(QMainWindow):
             template_html = self._generate_mode_template(title, mode)
             self.editor.setHtml(template_html)
         else:
-            self.editor.setHtml(f"<h1>{title}</h1><p></p>")
+            self.editor.clear()
 
+        self.editor.document().setModified(False)
         self.spell_engine.sync_story_codex_whitelist(self.codex_manager)
         self.left_navigator.scan_manuscript(self.canvas_area.document())
-        self.setWindowTitle(f"Volumenodex — {title}")
+        self._update_window_title()
         self._update_metrics()
         self._schedule_revision_analysis()
 
     def _generate_mode_template(self, title: str, mode: DocumentMode) -> str:
         if mode == DocumentMode.ACADEMIC:
             return (
-                f"<h1>{title}</h1>"
                 "<p><b>Author Name</b><br>"
                 "<i>Department / Academic Institution Affiliation</i><br>"
                 "<i>scholar@institution.edu</i></p>"
@@ -1120,7 +1175,6 @@ class MainWindow(QMainWindow):
             )
         elif mode == DocumentMode.NON_FICTION:
             return (
-                f"<h1>{title}</h1>"
                 "<p><i>An In-Depth Investigation and Analysis</i></p>"
                 "<p><b>Introduction: The Central Thesis</b><br>"
                 "Every significant shift begins with an observation that is easily overlooked. "
@@ -1138,7 +1192,6 @@ class MainWindow(QMainWindow):
             )
         else:
             return (
-                f"<h1>{title}</h1>"
                 "<p><b>Chapter One: The Salt and the Stars</b></p>"
                 "<p>The harbor bell chimed three times through the morning sea fog. "
                 "Across the polished oak desk, the ancient parchment maps lay unfurled, their ink smelling of crushed oak gall and dried cedar. "
@@ -1151,6 +1204,8 @@ class MainWindow(QMainWindow):
             )
 
     def open_document(self) -> None:
+        if not self._maybe_save_prompt():
+            return
         path, _ = QFileDialog.getOpenFileName(
             self, "Open Document", "", "Word Document (*.docx);;All Files (*.*)"
         )
@@ -1177,13 +1232,14 @@ class MainWindow(QMainWindow):
             self.spell_engine.sync_story_codex_whitelist(self.codex_manager)
             self.left_navigator.scan_manuscript(self.canvas_area.document())
             self._check_live_mentions()
-            self.setWindowTitle(f"Volumenodex — {os.path.basename(path)}")
+            self.editor.document().setModified(False)
+            self._update_window_title()
             self._update_metrics()
             self._schedule_revision_analysis()
 
-    def save_document(self) -> None:
+    def save_document(self) -> bool:
         if not self.current_file_path:
-            self.save_document_as()
+            return self.save_document_as()
         else:
             meta = self.codex_manager.to_dict()
             meta["document_mode"] = self.document_mode.value
@@ -1201,9 +1257,13 @@ class MainWindow(QMainWindow):
                 meta
             )
             if success:
+                self.editor.document().setModified(False)
+                self._update_window_title()
                 self.statusBar().showMessage("Document, Story Codex, and Citations saved successfully.", 3000)
+                self._cleanup_draft_recovery()
+            return bool(success)
 
-    def save_document_as(self) -> None:
+    def save_document_as(self) -> bool:
         path, _ = QFileDialog.getSaveFileName(
             self, "Save Document As", "Untitled.docx", "Word Document (*.docx)"
         )
@@ -1211,8 +1271,10 @@ class MainWindow(QMainWindow):
             if not path.endswith(".docx"):
                 path += ".docx"
             self.current_file_path = path
-            self.save_document()
-            self.setWindowTitle(f"Volumenodex — {os.path.basename(path)}")
+            success = self.save_document()
+            self._update_window_title()
+            return success
+        return False
 
     def export_pdf(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -1252,7 +1314,141 @@ class MainWindow(QMainWindow):
         )
 
     def _populate_initial_manuscript(self) -> None:
-        self.editor.setHtml("<h1>Untitled Document</h1><p></p>")
+        self.editor.clear()
+        self.editor.document().setModified(False)
         self.left_navigator.scan_manuscript(self.canvas_area.document())
         self.right_codex.refresh()
         self.spell_engine.sync_story_codex_whitelist(self.codex_manager)
+        self._update_window_title()
+
+    # --- Save on Close & Document State Tracking ---
+    def _on_modification_changed(self, modified: bool) -> None:
+        self._update_window_title()
+
+    def _update_window_title(self) -> None:
+        if self.current_file_path:
+            name = os.path.basename(self.current_file_path)
+        else:
+            name = self.story_metadata.get("title") or "Untitled Document"
+        star = " *" if self.editor.document().isModified() else ""
+        self.setWindowTitle(f"Volumenodex — {name}{star}")
+
+    def _maybe_save_prompt(self) -> bool:
+        """Prompts the author to save unsaved modifications.
+        Returns True if safe to proceed (saved or discarded), False if canceled."""
+        if not self.editor.document().isModified():
+            return True
+
+        # Check for automated test override or bypass
+        test_response = getattr(self, "_test_save_prompt_response", None)
+        if test_response is not None:
+            ret = test_response
+        elif os.environ.get("PYTEST_CURRENT_TEST") or getattr(self, "_suppress_save_prompt", False):
+            # Bypass modal dialog during automated unit test runs unless explicitly testing prompt
+            return True
+        else:
+            doc_name = (
+                os.path.basename(self.current_file_path)
+                if self.current_file_path
+                else (self.story_metadata.get("title") or "Untitled Document")
+            )
+
+            box = QMessageBox(self)
+            box.setWindowTitle("Volumenodex")
+            box.setText(f"Do you want to save changes to \"{doc_name}\"?")
+            box.setInformativeText("Your changes will be lost if you close or switch documents without saving.")
+            box.setStandardButtons(
+                QMessageBox.StandardButton.Save
+                | QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel
+            )
+            box.setDefaultButton(QMessageBox.StandardButton.Save)
+            ret = box.exec()
+
+        if ret == QMessageBox.StandardButton.Save:
+            return self.save_document()
+        elif ret == QMessageBox.StandardButton.Discard:
+            return True
+        else:  # Cancel
+            return False
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._maybe_save_prompt():
+            event.accept()
+        else:
+            event.ignore()
+
+    # --- Variable Auto-Save & Settings Handlers ---
+    def _apply_autosave_settings(self) -> None:
+        enabled = self.settings_manager.autosave_enabled
+        interval_m = self.settings_manager.autosave_interval_minutes
+
+        if hasattr(self, "act_autosave_enable"):
+            self.act_autosave_enable.setChecked(enabled)
+        if hasattr(self, "_autosave_interval_actions") and interval_m in self._autosave_interval_actions:
+            self._autosave_interval_actions[interval_m].setChecked(True)
+
+        badge_text = self.settings_manager.get_autosave_label()
+        self.ribbon.update_autosave_badge(badge_text)
+
+        if enabled and interval_m > 0:
+            self._autosave_timer.start(interval_m * 60 * 1000)
+        else:
+            self._autosave_timer.stop()
+
+    def _on_autosave_timer(self) -> None:
+        if not self.editor.document().isModified():
+            return
+
+        now_str = datetime.now().strftime("%H:%M:%S")
+        if self.current_file_path:
+            success = self.save_document()
+            if success:
+                self.ribbon.update_autosave_badge(f"Auto-Saved ({now_str})")
+                self.statusBar().showMessage(f"Auto-saved to {os.path.basename(self.current_file_path)} at {now_str}", 4000)
+        else:
+            self._save_draft_recovery(now_str)
+
+    def _save_draft_recovery(self, now_str: str) -> None:
+        try:
+            draft_dir = os.path.expanduser("~/.volumenodex/autosave")
+            os.makedirs(draft_dir, exist_ok=True)
+            draft_path = os.path.join(draft_dir, "untitled_recovery.docx")
+            meta = self.codex_manager.to_dict()
+            meta["document_mode"] = self.document_mode.value
+            meta["citations"] = self.citation_manager.to_dict()
+            meta["citation_style"] = self.citation_manager.active_style
+            if self.story_metadata:
+                meta.update(self.story_metadata)
+            IOManager.save_docx(draft_path, self.editor.document(), self.layout_model, meta)
+            self.ribbon.update_autosave_badge(f"Draft Saved ({now_str})")
+            self.statusBar().showMessage(f"Draft auto-saved to recovery vault at {now_str}", 4000)
+        except Exception as e:
+            print(f"Error during draft recovery save: {e}")
+
+    def _cleanup_draft_recovery(self) -> None:
+        try:
+            draft_path = os.path.expanduser("~/.volumenodex/autosave/untitled_recovery.docx")
+            if os.path.exists(draft_path):
+                os.remove(draft_path)
+            meta_path = os.path.expanduser("~/.volumenodex/autosave/untitled_recovery.story.json")
+            if os.path.exists(meta_path):
+                os.remove(meta_path)
+        except Exception:
+            pass
+
+    def _show_settings_dialog(self) -> None:
+        dlg = SettingsDialog(self.settings_manager, self)
+        if dlg.exec():
+            self._apply_autosave_settings()
+            self.canvas_area.show_crop_marks = self.settings_manager.show_crop_marks
+            self.ribbon.chk_crop_marks.setChecked(self.settings_manager.show_crop_marks)
+
+    def _on_menu_autosave_toggled(self, checked: bool) -> None:
+        self.settings_manager.autosave_enabled = checked
+        self.settings_manager.save()
+
+    def _on_menu_autosave_interval_triggered(self, minutes: int) -> None:
+        self.settings_manager.autosave_enabled = True
+        self.settings_manager.autosave_interval_minutes = minutes
+        self.settings_manager.save()

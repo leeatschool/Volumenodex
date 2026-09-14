@@ -133,7 +133,7 @@ class NewDocumentDialog(QDialog):
 
         # Template Checkbox
         self.chk_template = QCheckBox("Generate starter manuscript outline template for this mode", self)
-        self.chk_template.setChecked(True)
+        self.chk_template.setChecked(False)
         layout.addWidget(self.chk_template)
 
         # Dynamic Mode Banner

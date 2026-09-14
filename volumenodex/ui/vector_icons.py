@@ -1,5 +1,6 @@
 """High-fidelity vector icon renderer for the Modern Fluent Ribbon and UI chrome."""
 
+import math
 from typing import Dict, Tuple
 from PySide6.QtCore import Qt, QRectF, QPointF
 from PySide6.QtGui import (
@@ -24,7 +25,56 @@ class VectorIconFactory:
 
         s = float(size)
 
-        if icon_name == "cut":
+        if icon_name in ("save", "disk", "floppy"):
+            # Classic 3.5" floppy disk
+            casing = QPainterPath()
+            casing.moveTo(s * 0.18, s * 0.18)
+            casing.lineTo(s * 0.72, s * 0.18)
+            casing.lineTo(s * 0.82, s * 0.28)
+            casing.lineTo(s * 0.82, s * 0.82)
+            casing.lineTo(s * 0.18, s * 0.82)
+            casing.closeSubpath()
+            painter.drawPath(casing)
+
+            # Top shutter/slider
+            painter.drawRect(QRectF(s * 0.32, s * 0.18, s * 0.36, s * 0.26))
+            # Little rectangular window in shutter
+            painter.fillRect(QRectF(s * 0.40, s * 0.22, s * 0.08, s * 0.16), QColor(color))
+
+            # Bottom label area
+            painter.drawRect(QRectF(s * 0.28, s * 0.52, s * 0.44, s * 0.30))
+            # Label lines
+            painter.drawLine(QPointF(s * 0.34, s * 0.62), QPointF(s * 0.66, s * 0.62))
+            painter.drawLine(QPointF(s * 0.34, s * 0.72), QPointF(s * 0.66, s * 0.72))
+
+        elif icon_name in ("settings", "gear", "preferences"):
+            # Sleek gear icon
+            center = QPointF(s * 0.5, s * 0.5)
+            r_out = s * 0.40
+            r_in = s * 0.30
+            painter.drawEllipse(center, s * 0.14, s * 0.14)
+            gear_path = QPainterPath()
+            teeth = 6
+            for i in range(teeth):
+                angle1 = i * (2 * math.pi / teeth) - 0.22
+                angle2 = i * (2 * math.pi / teeth) + 0.22
+                angle3 = (i + 0.5) * (2 * math.pi / teeth) - 0.16
+                angle4 = (i + 0.5) * (2 * math.pi / teeth) + 0.16
+                p1 = QPointF(center.x() + r_in * math.cos(angle1), center.y() + r_in * math.sin(angle1))
+                p2 = QPointF(center.x() + r_out * math.cos(angle1), center.y() + r_out * math.sin(angle1))
+                p3 = QPointF(center.x() + r_out * math.cos(angle2), center.y() + r_out * math.sin(angle2))
+                p4 = QPointF(center.x() + r_in * math.cos(angle2), center.y() + r_in * math.sin(angle2))
+                if i == 0:
+                    gear_path.moveTo(p1)
+                else:
+                    gear_path.lineTo(p1)
+                gear_path.lineTo(p2)
+                gear_path.lineTo(p3)
+                gear_path.lineTo(p4)
+            gear_path.closeSubpath()
+            painter.drawPath(gear_path)
+
+        elif icon_name == "cut":
             # Scissor blades and finger loops
             # Top blade
             painter.drawLine(QPointF(s * 0.25, s * 0.35), QPointF(s * 0.8, s * 0.75))

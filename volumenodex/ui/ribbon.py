@@ -126,6 +126,10 @@ class RibbonBar(QWidget):
     typewriterSoundChanged = Signal(TypewriterSoundPreset)
     ambientSoundChanged = Signal(AmbientSoundPreset)
 
+    # Document & Studio Header signals
+    saveRequested = Signal()
+    settingsRequested = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(126)
@@ -138,12 +142,98 @@ class RibbonBar(QWidget):
         self.tab_widget.setDocumentMode(True)
         main_layout.addWidget(self.tab_widget)
 
+        self._build_header_controls()
+
         self._build_home_tab()
         self._build_insert_tab()
         self._build_layout_tab()
         self._build_story_tab()
         self._build_review_tab()
         self._build_view_tab()
+
+    def _build_header_controls(self) -> None:
+        """Constructs Quick Access header controls in the top tab bar."""
+        # Top-Left Header: Prominent Save button
+        left_widget = QWidget()
+        left_layout = QHBoxLayout(left_widget)
+        left_layout.setContentsMargins(4, 2, 6, 2)
+        left_layout.setSpacing(4)
+
+        self.btn_header_save = QPushButton("Save")
+        self.btn_header_save.setObjectName("headerSaveBtn")
+        self.btn_header_save.setIcon(VectorIconFactory.create_icon("save", color="#c0caf5", size=16))
+        self.btn_header_save.setIconSize(QSize(16, 16))
+        self.btn_header_save.setToolTip("Save Document (Ctrl+S)")
+        self.btn_header_save.setStyleSheet("""
+            QPushButton#headerSaveBtn {
+                background-color: #24283b;
+                color: #c0caf5;
+                border: 1px solid #3b4261;
+                border-radius: 4px;
+                padding: 3px 10px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton#headerSaveBtn:hover {
+                background-color: #2e344e;
+                border-color: #7aa2f7;
+                color: #ffffff;
+            }
+            QPushButton#headerSaveBtn:pressed {
+                background-color: #7aa2f7;
+                color: #1a1b26;
+            }
+        """)
+        self.btn_header_save.clicked.connect(self.saveRequested.emit)
+        left_layout.addWidget(self.btn_header_save)
+        self.tab_widget.setCornerWidget(left_widget, Qt.Corner.TopLeftCorner)
+
+        # Top-Right Header: Auto-Save status badge and Settings button
+        right_widget = QWidget()
+        right_layout = QHBoxLayout(right_widget)
+        right_layout.setContentsMargins(6, 2, 8, 2)
+        right_layout.setSpacing(6)
+
+        self.lbl_autosave_badge = QLabel("Auto-Save: 2m")
+        self.lbl_autosave_badge.setToolTip("Current background automatic save interval (adjustable in Settings)")
+        self.lbl_autosave_badge.setStyleSheet("""
+            QLabel {
+                color: #7aa2f7;
+                background-color: rgba(122, 162, 247, 0.12);
+                border: 1px solid rgba(122, 162, 247, 0.25);
+                border-radius: 4px;
+                padding: 2px 8px;
+                font-size: 10px;
+                font-weight: 600;
+            }
+        """)
+        right_layout.addWidget(self.lbl_autosave_badge)
+
+        self.btn_header_settings = QToolButton()
+        self.btn_header_settings.setIcon(VectorIconFactory.create_icon("settings", color="#c0caf5", size=16))
+        self.btn_header_settings.setIconSize(QSize(16, 16))
+        self.btn_header_settings.setToolTip("Studio Settings & Preferences (Ctrl+,)")
+        self.btn_header_settings.setStyleSheet("""
+            QToolButton {
+                background-color: transparent;
+                border: 1px solid transparent;
+                border-radius: 4px;
+                padding: 3px;
+                color: #c0caf5;
+            }
+            QToolButton:hover {
+                background-color: rgba(255, 255, 255, 0.08);
+                border: 1px solid rgba(255, 255, 255, 0.15);
+            }
+        """)
+        self.btn_header_settings.clicked.connect(self.settingsRequested.emit)
+        right_layout.addWidget(self.btn_header_settings)
+        self.tab_widget.setCornerWidget(right_widget, Qt.Corner.TopRightCorner)
+
+    def update_autosave_badge(self, text: str) -> None:
+        """Updates the header autosave status badge text."""
+        if hasattr(self, "lbl_autosave_badge"):
+            self.lbl_autosave_badge.setText(text)
 
     def _create_tool_button(self, icon_name: str, tooltip: str, text: str = "", checkable: bool = False, width: int = 30) -> QToolButton:
         btn = QToolButton()
