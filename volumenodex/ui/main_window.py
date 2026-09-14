@@ -6,12 +6,15 @@ from typing import Optional
 from PySide6.QtCore import Qt, QTime, QDate, QTimer, QThreadPool
 from PySide6.QtGui import (
     QFont, QColor, QTextCursor, QTextBlockFormat, QTextCharFormat,
-    QTextListFormat, QAction, QKeySequence, QIcon, QCloseEvent, QActionGroup
+    QTextListFormat, QAction, QKeySequence, QIcon, QCloseEvent, QActionGroup,
+    QBrush
 )
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFileDialog,
-    QColorDialog, QMessageBox, QApplication, QStackedWidget, QInputDialog
+    QColorDialog, QMessageBox, QApplication, QStackedWidget, QInputDialog,
+    QSplitter, QDialog
 )
+from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 
 from volumenodex.core.document_model import (
     PageLayoutModel, PaperSizePreset, Orientation, PageMargins, DocumentStatistics,
@@ -20,10 +23,13 @@ from volumenodex.core.document_model import (
 from volumenodex.canvas.paper_texture import PaperTextureEngine, TextureType
 from volumenodex.core.theme_manager import ThemeManager
 from volumenodex.core.io_manager import IOManager
+from volumenodex.core.export_engine import ExportEngine
 from volumenodex.ui.ribbon import RibbonBar
 from volumenodex.ui.ruler import InteractiveRuler
 from volumenodex.canvas.paginated_canvas import PaginatedCanvas
 from volumenodex.ui.status_bar import VolumenodexStatusBar
+from volumenodex.ui.table_dialog import TableDialog
+from volumenodex.ui.header_footer_dialog import HeaderFooterDialog
 from volumenodex.pet.pet_model import PetProfile, PetMood, DEFAULT_PETS
 from volumenodex.pet.insight_engine import InsightEngine
 from volumenodex.pet.pet_dock import FloatingPetDock
@@ -43,6 +49,7 @@ from volumenodex.core.settings_manager import SettingsManager
 from volumenodex.ui.settings_dialog import SettingsDialog
 
 
+
 class MainWindow(QMainWindow):
     """The central studio window for Volumenodex."""
 
@@ -50,7 +57,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Volumenodex — Untitled Document")
         self.resize(1280, 850)
+        self.setMinimumSize(480, 360)
         self._setup_window_icon()
+        self._last_metrics_words = 0
 
         # Core Engines
         self.theme_manager = ThemeManager("Deep Midnight Studio", dark_paper=False)
@@ -121,8 +130,18 @@ class MainWindow(QMainWindow):
         # Initial Document Content & Metrics
         self._populate_initial_manuscript()
         self._update_metrics()
+        self.status_bar.update_daily_goal(
+            self.settings_manager.daily_words_count,
+            self.settings_manager.daily_word_goal
+        )
         self._reposition_pet_dock()
         self._schedule_revision_analysis()
+
+        # Check auto-open recent document setting
+        if self.settings_manager.auto_open_recent:
+            recent_list = self.settings_manager.recent_files
+            if recent_list and os.path.exists(recent_list[0]):
+                self._load_file(recent_list[0])
 
     def _init_ui(self) -> None:
         central_widget = QWidget(self)
@@ -150,8 +169,11 @@ class MainWindow(QMainWindow):
         self.left_navigator = ChapterNavigatorDrawer(self.canvas_workspace)
         cw_layout.addWidget(self.left_navigator)
 
-        # Center Column: Interactive Ruler + Paginated Canvas Area
-        center_container = QWidget(self.canvas_workspace)
+        # Center Workspace Splitter: Interactive Ruler + Primary Paginated Canvas Area + Optional Split Secondary Canvas Area
+        self.editor_splitter = QSplitter(Qt.Orientation.Horizontal, self.canvas_workspace)
+        self.editor_splitter.setChildrenCollapsible(False)
+
+        center_container = QWidget(self.editor_splitter)
         center_layout = QVBoxLayout(center_container)
         center_layout.setContentsMargins(0, 0, 0, 0)
         center_layout.setSpacing(0)
@@ -164,7 +186,23 @@ class MainWindow(QMainWindow):
         )
         self.canvas_area.spell_engine = self.spell_engine
         center_layout.addWidget(self.canvas_area, stretch=1)
-        cw_layout.addWidget(center_container, stretch=1)
+        self.editor_splitter.addWidget(center_container)
+
+        # Secondary Split Screen Pane
+        self.secondary_container = QWidget(self.editor_splitter)
+        sec_layout = QVBoxLayout(self.secondary_container)
+        sec_layout.setContentsMargins(0, 0, 0, 0)
+        sec_layout.setSpacing(0)
+        self.secondary_canvas = PaginatedCanvas(
+            self.layout_model, self.texture_engine, self.theme_manager, self.secondary_container
+        )
+        self.secondary_canvas.spell_engine = self.spell_engine
+        self.secondary_canvas.set_document(self.canvas_area.document())
+        sec_layout.addWidget(self.secondary_canvas, stretch=1)
+        self.secondary_container.hide()
+        self.editor_splitter.addWidget(self.secondary_container)
+
+        cw_layout.addWidget(self.editor_splitter, stretch=1)
 
         # Right Push Panel Stack: Worldbuilding Codex vs Revision Inspector vs Citation Generator
         self.right_stack = QStackedWidget(self.canvas_workspace)
@@ -236,6 +274,9 @@ class MainWindow(QMainWindow):
         act_open.triggered.connect(self.open_document)
         file_menu.addAction(act_open)
 
+        self.recent_menu = file_menu.addMenu("Open &Recent")
+        self._rebuild_recent_menu()
+
         file_menu.addSeparator()
 
         act_save = QAction("Save", self)
@@ -248,10 +289,46 @@ class MainWindow(QMainWindow):
         act_save_as.triggered.connect(self.save_document_as)
         file_menu.addAction(act_save_as)
 
-        act_export_pdf = QAction("Export to PDF...", self)
+        file_menu.addSeparator()
+
+        act_print = QAction("Print...", self)
+        act_print.setShortcut(QKeySequence.StandardKey.Print)
+        act_print.triggered.connect(lambda: self.print_document(low_ink=False))
+        file_menu.addAction(act_print)
+
+        act_print_low_ink = QAction("Print (Low-Ink Mode)...", self)
+        act_print_low_ink.triggered.connect(lambda: self.print_document(low_ink=True))
+        file_menu.addAction(act_print_low_ink)
+
+        file_menu.addSeparator()
+
+        # Multi-Format Export Submenu
+        export_menu = file_menu.addMenu("&Export")
+
+        act_export_pdf = QAction("PDF Document (.pdf)...", self)
         act_export_pdf.setShortcut(QKeySequence("Ctrl+Shift+E"))
         act_export_pdf.triggered.connect(self.export_pdf)
-        file_menu.addAction(act_export_pdf)
+        export_menu.addAction(act_export_pdf)
+
+        act_export_epub = QAction("EPUB 3 E-Book (.epub)...", self)
+        act_export_epub.triggered.connect(self.export_epub)
+        export_menu.addAction(act_export_epub)
+
+        act_export_img = QAction("High-Res Page Images (.png, .jpg)...", self)
+        act_export_img.triggered.connect(self.export_page_images)
+        export_menu.addAction(act_export_img)
+
+        act_export_md = QAction("Markdown (.md)...", self)
+        act_export_md.triggered.connect(self.export_markdown)
+        export_menu.addAction(act_export_md)
+
+        act_export_html = QAction("Clean HTML5 (.html)...", self)
+        act_export_html.triggered.connect(self.export_html)
+        export_menu.addAction(act_export_html)
+
+        act_export_txt = QAction("Plain Text (.txt)...", self)
+        act_export_txt.triggered.connect(self.export_plain_text)
+        export_menu.addAction(act_export_txt)
 
         file_menu.addSeparator()
 
@@ -329,6 +406,19 @@ class MainWindow(QMainWindow):
         act_zen.setShortcut(QKeySequence("F11"))
         act_zen.triggered.connect(self.toggle_zen_mode)
         view_menu.addAction(act_zen)
+
+        act_split = QAction("Split Screen Dual Workspace", self)
+        act_split.setCheckable(True)
+        act_split.setShortcut(QKeySequence("Ctrl+\\"))
+        act_split.triggered.connect(self.toggle_split_screen)
+        self.act_split_screen = act_split
+        view_menu.addAction(act_split)
+
+        act_typewriter = QAction("Typewriter Scrolling", self)
+        act_typewriter.setCheckable(True)
+        act_typewriter.triggered.connect(self._toggle_typewriter_scrolling)
+        self.act_typewriter_scroll = act_typewriter
+        view_menu.addAction(act_typewriter)
 
         view_menu.addSeparator()
 
@@ -418,6 +508,10 @@ class MainWindow(QMainWindow):
         self.ribbon.textColorSelected.connect(self.canvas_area.set_text_color)
         self.ribbon.highlightColorSelected.connect(self.canvas_area.set_highlight_color)
         self.ribbon.clearHighlightRequested.connect(self.canvas_area.clear_highlight)
+        self.ribbon.scriptAlignmentRequested.connect(self.canvas_area.set_script_alignment)
+        self.ribbon.increaseIndentRequested.connect(self.canvas_area.increase_indent)
+        self.ribbon.decreaseIndentRequested.connect(self.canvas_area.decrease_indent)
+        self.ribbon.firstLineIndentRequested.connect(lambda: self.canvas_area.set_first_line_indent(36.0))
 
         # Paragraph Alignment & Spacing
         self.ribbon.alignLeftRequested.connect(lambda: ed.setAlignment(Qt.AlignmentFlag.AlignLeft))
@@ -432,6 +526,11 @@ class MainWindow(QMainWindow):
         self.ribbon.customStyleSelected.connect(self._on_custom_style_selected)
 
         # Insert actions
+        self.ribbon.insertTableRequested.connect(self._open_table_dialog)
+        self.ribbon.insertFootnoteRequested.connect(self._insert_footnote)
+        self.ribbon.insertHeadnoteRequested.connect(self._insert_headnote)
+        self.ribbon.headerFooterRequested.connect(self._open_header_footer_dialog)
+        self.canvas_area.headerFooterEditRequested.connect(self._open_header_footer_dialog)
         self.ribbon.pageBreakRequested.connect(self._insert_page_break)
         self.ribbon.horizontalRuleRequested.connect(self._insert_horizontal_rule)
         self.ribbon.dateTimeRequested.connect(self._insert_date_time)
@@ -454,6 +553,8 @@ class MainWindow(QMainWindow):
         self.status_bar.zoomChanged.connect(self._on_zoom_changed)
         self.ribbon.themeChanged.connect(self._on_theme_changed)
         self.ribbon.zenModeRequested.connect(self.toggle_zen_mode)
+        self.ribbon.splitScreenRequested.connect(self.toggle_split_screen)
+        self.ribbon.typewriterScrollToggled.connect(self._toggle_typewriter_scrolling)
         self.ribbon.statisticsRequested.connect(self._show_statistics_dialog)
 
         # Ruler interaction
@@ -530,9 +631,16 @@ class MainWindow(QMainWindow):
         self.citation_drawer.collapsedChanged.connect(self._on_citation_collapsed_changed)
         self.citation_drawer.citationUpdated.connect(self._on_citations_changed)
 
-        # Ribbon Header Actions (Save & Settings)
+        # Ribbon Header Actions (Print, Save & Settings)
         self.ribbon.saveRequested.connect(self.save_document)
         self.ribbon.settingsRequested.connect(self._show_settings_dialog)
+        self.ribbon.printRequested.connect(lambda: self.print_document(low_ink=False))
+        if hasattr(self.ribbon, "btn_header_print"):
+            self.ribbon.btn_header_print.clicked.connect(lambda: self.print_document(low_ink=False))
+
+        # Status Bar Daily Goal Progress Ring
+        if hasattr(self.status_bar, "progress_ring"):
+            self.status_bar.progress_ring.goalAdjusted.connect(self._on_daily_goal_adjusted)
 
         # Document Modification Tracking for Title and Save Prompts
         self.editor.document().modificationChanged.connect(self._on_modification_changed)
@@ -1131,6 +1239,26 @@ class MainWindow(QMainWindow):
         stats = DocumentStatistics.compute(text, page_count)
         self.status_bar.update_statistics(stats)
 
+        # Track daily word count progress
+        curr_words = stats.word_count
+        if not hasattr(self, "_last_metrics_words"):
+            self._last_metrics_words = curr_words
+        delta = curr_words - self._last_metrics_words
+        if delta > 0:
+            self.settings_manager.record_words(delta)
+        self._last_metrics_words = curr_words
+        self.status_bar.update_daily_goal(
+            self.settings_manager.daily_words_count,
+            self.settings_manager.daily_word_goal
+        )
+
+    def _on_daily_goal_adjusted(self, goal: int) -> None:
+        self.settings_manager.daily_word_goal = goal
+        self.status_bar.update_daily_goal(
+            self.settings_manager.daily_words_count,
+            goal
+        )
+
     def _update_ribbon_states(self) -> None:
         ed = self.editor
         self.ribbon.btn_bold.setChecked(ed.fontWeight() >= 700)
@@ -1229,6 +1357,43 @@ class MainWindow(QMainWindow):
                 "<p>He dipped his quill into the dark inkwell. The paper drank the pigment cleanly, leaving crisp, elegant lines that would outlast empires.</p>"
             )
 
+    def _load_file(self, path: str) -> bool:
+        if not os.path.exists(path):
+            QMessageBox.warning(self, "File Not Found", f"The file '{path}' no longer exists.")
+            self._rebuild_recent_menu()
+            return False
+        meta = IOManager.load_docx(path, self.editor.document())
+        self.current_file_path = path
+        self.story_metadata = meta or {}
+        if meta:
+            self.codex_manager.from_dict(meta)
+            self.right_codex.refresh()
+            if "citations" in meta and isinstance(meta["citations"], list):
+                self.citation_manager.from_dict(meta["citations"])
+                if "citation_style" in meta:
+                    self.citation_manager.active_style = meta["citation_style"]
+                self.citation_drawer.refresh()
+            if "document_mode" in meta:
+                try:
+                    mode = DocumentMode(meta["document_mode"])
+                    self.set_document_mode(mode)
+                except ValueError:
+                    self.set_document_mode(DocumentMode.CREATIVE_FICTION)
+            else:
+                self.set_document_mode(DocumentMode.CREATIVE_FICTION)
+        self.spell_engine.sync_story_codex_whitelist(self.codex_manager)
+        self.left_navigator.scan_manuscript(self.canvas_area.document())
+        self._check_live_mentions()
+        self.editor.document().setModified(False)
+        self._update_window_title()
+        self._update_metrics()
+        self._schedule_revision_analysis()
+        self.settings_manager.add_recent_file(path)
+        self._rebuild_recent_menu()
+        if hasattr(self, "secondary_canvas"):
+            self.secondary_canvas.set_document(self.canvas_area.document())
+        return True
+
     def open_document(self) -> None:
         if not self._maybe_save_prompt():
             return
@@ -1236,32 +1401,40 @@ class MainWindow(QMainWindow):
             self, "Open Document", "", "Word Document (*.docx);;All Files (*.*)"
         )
         if path:
-            meta = IOManager.load_docx(path, self.editor.document())
-            self.current_file_path = path
-            self.story_metadata = meta or {}
-            if meta:
-                self.codex_manager.from_dict(meta)
-                self.right_codex.refresh()
-                if "citations" in meta and isinstance(meta["citations"], list):
-                    self.citation_manager.from_dict(meta["citations"])
-                    if "citation_style" in meta:
-                        self.citation_manager.active_style = meta["citation_style"]
-                    self.citation_drawer.refresh()
-                if "document_mode" in meta:
-                    try:
-                        mode = DocumentMode(meta["document_mode"])
-                        self.set_document_mode(mode)
-                    except ValueError:
-                        self.set_document_mode(DocumentMode.CREATIVE_FICTION)
-                else:
-                    self.set_document_mode(DocumentMode.CREATIVE_FICTION)
-            self.spell_engine.sync_story_codex_whitelist(self.codex_manager)
-            self.left_navigator.scan_manuscript(self.canvas_area.document())
-            self._check_live_mentions()
-            self.editor.document().setModified(False)
-            self._update_window_title()
-            self._update_metrics()
-            self._schedule_revision_analysis()
+            self._load_file(path)
+
+    def _rebuild_recent_menu(self) -> None:
+        if not hasattr(self, "recent_menu") or self.recent_menu is None:
+            return
+        self.recent_menu.clear()
+        recent_files = self.settings_manager.recent_files
+        valid_files = [f for f in recent_files if os.path.exists(f)]
+        if not valid_files:
+            act_empty = QAction("No Recent Documents", self)
+            act_empty.setEnabled(False)
+            self.recent_menu.addAction(act_empty)
+            return
+
+        for path in valid_files:
+            name = os.path.basename(path)
+            act = QAction(f"{name}  —  {path}", self)
+            act.setData(path)
+            act.triggered.connect(lambda checked=False, p=path: self._on_recent_file_triggered(p))
+            self.recent_menu.addAction(act)
+
+        self.recent_menu.addSeparator()
+        act_clear = QAction("Clear Recent History", self)
+        act_clear.triggered.connect(self._on_clear_recent_history)
+        self.recent_menu.addAction(act_clear)
+
+    def _on_recent_file_triggered(self, path: str) -> None:
+        if not self._maybe_save_prompt():
+            return
+        self._load_file(path)
+
+    def _on_clear_recent_history(self) -> None:
+        self.settings_manager.clear_recent_files()
+        self._rebuild_recent_menu()
 
     def save_document(self) -> bool:
         if not self.current_file_path:
@@ -1283,6 +1456,8 @@ class MainWindow(QMainWindow):
                 meta
             )
             if success:
+                self.settings_manager.add_recent_file(self.current_file_path)
+                self._rebuild_recent_menu()
                 self.editor.document().setModified(False)
                 self._update_window_title()
                 self.statusBar().showMessage("Document, Story Codex, and Citations saved successfully.", 3000)
@@ -1302,6 +1477,53 @@ class MainWindow(QMainWindow):
             return success
         return False
 
+    def print_document(self, low_ink: bool = False) -> None:
+        """Physical print handler with optional Low-Ink Mode that optimizes ink/toner usage."""
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        dialog = QPrintDialog(printer, self)
+        dialog.setWindowTitle("Print Document (Low-Ink Mode)" if low_ink else "Print Document")
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        doc_to_print = self.canvas_area.document()
+        if low_ink:
+            # Low-Ink Mode: clone document and transform colors to charcoal (#444444)
+            # and strip dark backgrounds to dramatically reduce ink/toner usage
+            doc_to_print = doc_to_print.clone(self)
+            cursor = QTextCursor(doc_to_print)
+            cursor.beginEditBlock()
+            it = doc_to_print.begin()
+            while it.isValid():
+                block = it
+                bf = block.blockFormat()
+                if bf.background().color().value() < 200:
+                    bf.setBackground(QBrush(QColor("#ffffff")))
+                    cursor.setPosition(block.position())
+                    cursor.setBlockFormat(bf)
+
+                frag_it = block.begin()
+                while not frag_it.atEnd():
+                    frag = frag_it.fragment()
+                    if frag.isValid():
+                        cf = frag.charFormat()
+                        c = cf.foreground().color()
+                        if c.lightness() < 80:
+                            cf.setForeground(QBrush(QColor("#444444")))
+                        if cf.background().style() != Qt.BrushStyle.NoBrush:
+                            cf.setBackground(QBrush(Qt.BrushStyle.NoBrush))
+                        cur = QTextCursor(doc_to_print)
+                        cur.setPosition(frag.position())
+                        cur.setPosition(frag.position() + frag.length(), QTextCursor.MoveMode.KeepAnchor)
+                        cur.setCharFormat(cf)
+                    frag_it += 1
+                it = it.next()
+            cursor.endEditBlock()
+
+        doc_to_print.print_(printer)
+        self.statusBar().showMessage(
+            "Document sent to printer in Low-Ink Mode." if low_ink else "Document sent to printer.", 3000
+        )
+
     def export_pdf(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
             self, "Export to PDF", "Manuscript.pdf", "PDF Document (*.pdf)"
@@ -1312,6 +1534,154 @@ class MainWindow(QMainWindow):
             success = IOManager.export_pdf(path, self.editor.document(), self.layout_model)
             if success:
                 QMessageBox.information(self, "Export Complete", f"PDF exported successfully to:\n{path}")
+
+    def export_epub(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export to EPUB E-Book", "Manuscript.epub", "EPUB E-Book (*.epub)"
+        )
+        if path:
+            if not path.endswith(".epub"):
+                path += ".epub"
+            title = self.story_metadata.get("title") or "Manuscript"
+            author = self.story_metadata.get("author") or "Author"
+            success = ExportEngine.export_epub(path, self.editor.document(), title=title, author=author)
+            if success:
+                QMessageBox.information(self, "Export Complete", f"EPUB e-book created successfully:\n{path}")
+            else:
+                QMessageBox.warning(self, "Export Failed", f"Could not create EPUB at:\n{path}")
+
+    def export_page_images(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export High-Res Page Image", "Page_1.png", "PNG Image (*.png);;JPEG Image (*.jpg)"
+        )
+        if path:
+            curr_page = self.canvas_area._cursor_page_index()
+            success = ExportEngine.export_page_image(
+                path, self.editor.document(), self.layout_model, page_index=curr_page, dpi_scale=2.0
+            )
+            if success:
+                QMessageBox.information(self, "Export Complete", f"Page image exported successfully:\n{path}")
+            else:
+                QMessageBox.warning(self, "Export Failed", f"Could not export page image to:\n{path}")
+
+    def export_markdown(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export to Markdown", "Manuscript.md", "Markdown File (*.md)"
+        )
+        if path:
+            if not path.endswith(".md"):
+                path += ".md"
+            success = ExportEngine.export_markdown(path, self.editor.document())
+            if success:
+                QMessageBox.information(self, "Export Complete", f"Markdown exported successfully to:\n{path}")
+            else:
+                QMessageBox.warning(self, "Export Failed", f"Could not export markdown to:\n{path}")
+
+    def export_html(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export to Clean HTML5", "Manuscript.html", "HTML File (*.html)"
+        )
+        if path:
+            if not path.endswith(".html"):
+                path += ".html"
+            title = self.story_metadata.get("title") or "Manuscript"
+            success = ExportEngine.export_html(path, self.editor.document(), title=title)
+            if success:
+                QMessageBox.information(self, "Export Complete", f"HTML5 exported successfully to:\n{path}")
+            else:
+                QMessageBox.warning(self, "Export Failed", f"Could not export HTML to:\n{path}")
+
+    def export_plain_text(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export to Plain Text", "Manuscript.txt", "Text File (*.txt)"
+        )
+        if path:
+            if not path.endswith(".txt"):
+                path += ".txt"
+            success = ExportEngine.export_plain_text(path, self.editor.document())
+            if success:
+                QMessageBox.information(self, "Export Complete", f"Plain text exported successfully to:\n{path}")
+            else:
+                QMessageBox.warning(self, "Export Failed", f"Could not export plain text to:\n{path}")
+
+    def toggle_split_screen(self) -> None:
+        """Toggles horizontal dual split-screen side-by-side workspace."""
+        is_shown = not self.secondary_container.isHidden()
+        if is_shown:
+            self.secondary_container.hide()
+            if hasattr(self, "act_split_screen"):
+                self.act_split_screen.setChecked(False)
+            if hasattr(self.ribbon, "btn_split_screen"):
+                self.ribbon.btn_split_screen.setChecked(False)
+        else:
+            self.secondary_canvas.set_document(self.canvas_area.document())
+            self.secondary_container.show()
+            self.editor_splitter.setSizes([self.width() // 2, self.width() // 2])
+            if hasattr(self, "act_split_screen"):
+                self.act_split_screen.setChecked(True)
+            if hasattr(self.ribbon, "btn_split_screen"):
+                self.ribbon.btn_split_screen.setChecked(True)
+
+    def _toggle_typewriter_scrolling(self, enabled: Optional[bool] = None) -> None:
+        """Toggles typewriter scrolling mode keeping cursor centered vertically."""
+        if enabled is None:
+            enabled = not self.canvas_area.typewriter_scrolling
+        self.canvas_area.typewriter_scrolling = enabled
+        if hasattr(self, "secondary_canvas"):
+            self.secondary_canvas.typewriter_scrolling = enabled
+        if hasattr(self, "act_typewriter_scroll"):
+            self.act_typewriter_scroll.setChecked(enabled)
+        if hasattr(self.ribbon, "btn_typewriter_scroll"):
+            self.ribbon.btn_typewriter_scroll.setChecked(enabled)
+
+    def _open_table_dialog(self) -> None:
+        """Opens customizable table builder dialog."""
+        dlg = TableDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.canvas_area.insert_table(
+                rows=dlg.rows,
+                cols=dlg.cols,
+                has_header=dlg.has_header_row,
+                border_width=dlg.border_width,
+                cell_padding=dlg.cell_padding,
+            )
+
+    def _insert_footnote(self) -> None:
+        """Prompts for footnote reference and inserts it at cursor position."""
+        text, ok = QInputDialog.getText(
+            self, "Insert Footnote", "Enter footnote text / reference citation:"
+        )
+        if ok and text.strip():
+            self.canvas_area.insert_footnote(text.strip())
+
+    def _insert_headnote(self) -> None:
+        """Prompts for head note details and inserts banner into document."""
+        title, ok1 = QInputDialog.getText(
+            self, "Insert Head Note", "Section or Chapter Title / Topic:"
+        )
+        if not ok1 or not title.strip():
+            return
+        content, ok2 = QInputDialog.getText(
+            self, "Insert Head Note", "Head note annotation / summary content:"
+        )
+        if ok2 and content.strip():
+            self.canvas_area.insert_headnote(title.strip(), content.strip())
+
+    def _open_header_footer_dialog(self, page_index: int = -1) -> None:
+        """Opens the Running Headers & Footers dialog with per-page customization."""
+        if page_index < 0:
+            page_index = self.canvas_area._cursor_page_index()
+        total_pages = max(1, self.canvas_area.page_count)
+        dlg = HeaderFooterDialog(
+            model=self.canvas_area.header_footer_model,
+            total_pages=total_pages,
+            current_page=page_index + 1,
+            parent=self,
+        )
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.canvas_area.viewport().update()
+            if hasattr(self, "secondary_canvas"):
+                self.secondary_canvas.viewport().update()
 
     def _show_statistics_dialog(self) -> None:
         text = self.editor.toPlainText()

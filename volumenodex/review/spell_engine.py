@@ -155,6 +155,22 @@ class SpellCheckEngine:
         with self._lock:
             return w_lower in self._suggestion_cache
 
+    def is_correct(self, word: str) -> bool:
+        """Returns True if the word is spelled correctly or whitelisted."""
+        if not word or len(word) <= 1:
+            return True
+        w_lower = word.lower().strip()
+        with self._lock:
+            if w_lower in self.user_words or w_lower in self.session_ignored or w_lower in self.story_whitelist:
+                return True
+            if not self.spell:
+                return True
+            return w_lower not in self.spell.unknown([w_lower])
+
+    def check_word(self, word: str) -> bool:
+        """Returns True if the word is spelled correctly or whitelisted."""
+        return self.is_correct(word)
+
     def check_text(self, text: str) -> List[LensFinding]:
         """Scans text and returns structured findings for any spelling errors.
         

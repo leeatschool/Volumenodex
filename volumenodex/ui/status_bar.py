@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (
 )
 from volumenodex.core.document_model import DocumentStatistics
 from volumenodex.pet.companion_figures import CompanionFigureRenderer
+from volumenodex.ui.progress_ring import DailyGoalProgressRing
 
 
 class VolumenodexStatusBar(QWidget):
@@ -61,6 +62,9 @@ class VolumenodexStatusBar(QWidget):
         """)
         self.btn_pet_chip.clicked.connect(self.petClicked.emit)
         layout.addWidget(self.btn_pet_chip)
+
+        self.progress_ring = DailyGoalProgressRing()
+        layout.addWidget(self.progress_ring)
 
         layout.addWidget(self._create_separator())
 
@@ -145,3 +149,7 @@ class VolumenodexStatusBar(QWidget):
     def _zoom_step_up(self) -> None:
         cur = self.zoom_slider.value()
         self.zoom_slider.setValue(min(200, cur + 10))
+
+    def update_daily_goal(self, words: int, goal: int = None) -> None:
+        if hasattr(self, "progress_ring"):
+            self.progress_ring.set_progress(words, goal)

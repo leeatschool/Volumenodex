@@ -176,7 +176,65 @@ class SettingsDialog(QDialog):
         self.chk_crop_marks.setChecked(self.settings_manager.show_crop_marks)
         v_gen.addWidget(self.chk_crop_marks)
 
+        self.chk_auto_open_recent = QCheckBox("Automatically open the most recent document on startup", grp_general)
+        self.chk_auto_open_recent.setChecked(self.settings_manager.auto_open_recent)
+        v_gen.addWidget(self.chk_auto_open_recent)
+
         layout.addWidget(grp_general)
+
+        # 3. Writing Goals & Analytics
+        grp_goals = QGroupBox("WRITING TARGETS & RECENT FILES", self)
+        v_goals = QVBoxLayout(grp_goals)
+        v_goals.setSpacing(10)
+
+        h_goal = QHBoxLayout()
+        h_goal.addWidget(QLabel("Daily Word Count Target:"))
+        from PySide6.QtWidgets import QSpinBox
+        self.spin_daily_goal = QSpinBox()
+        self.spin_daily_goal.setRange(50, 50000)
+        self.spin_daily_goal.setSingleStep(250)
+        self.spin_daily_goal.setValue(self.settings_manager.daily_word_goal)
+        self.spin_daily_goal.setSuffix(" words")
+        self.spin_daily_goal.setStyleSheet("""
+            QSpinBox {
+                background-color: #24283b;
+                border: 1px solid #3b4261;
+                border-radius: 4px;
+                color: #ffffff;
+                padding: 4px 8px;
+            }
+        """)
+        h_goal.addWidget(self.spin_daily_goal)
+        h_goal.addStretch()
+        v_goals.addLayout(h_goal)
+
+        h_recent = QHBoxLayout()
+        lbl_rec_count = QLabel(f"Recent Documents Tracked: {len(self.settings_manager.recent_files)}")
+        lbl_rec_count.setStyleSheet("color: #787c99; font-size: 11px;")
+        h_recent.addWidget(lbl_rec_count)
+        h_recent.addStretch()
+
+        btn_clear_rec = QPushButton("Clear Recent History")
+        btn_clear_rec.setStyleSheet("""
+            QPushButton {
+                background-color: #24283b;
+                color: #f7768e;
+                border: 1px solid #3b4261;
+                border-radius: 4px;
+                padding: 4px 10px;
+                font-size: 10px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: rgba(247, 118, 142, 0.15);
+                border-color: #f7768e;
+            }
+        """)
+        btn_clear_rec.clicked.connect(lambda: (self.settings_manager.clear_recent_files(), lbl_rec_count.setText("Recent Documents Tracked: 0")))
+        h_recent.addWidget(btn_clear_rec)
+        v_goals.addLayout(h_recent)
+
+        layout.addWidget(grp_goals)
 
         # Buttons
         layout.addSpacing(8)
@@ -224,5 +282,7 @@ class SettingsDialog(QDialog):
         self.settings_manager.autosave_interval_minutes = int(self.combo_interval.currentData())
         self.settings_manager.default_document_mode = str(self.combo_default_mode.currentData())
         self.settings_manager.show_crop_marks = self.chk_crop_marks.isChecked()
+        self.settings_manager.auto_open_recent = self.chk_auto_open_recent.isChecked()
+        self.settings_manager.daily_word_goal = self.spin_daily_goal.value()
         self.settings_manager.save()
         self.accept()

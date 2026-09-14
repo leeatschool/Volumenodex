@@ -8,7 +8,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QToolButton,
     QComboBox, QSpinBox, QSlider, QLabel, QFrame, QMenu,
-    QPushButton
+    QPushButton, QScrollArea
 )
 from volumenodex.core.document_model import PaperSizePreset, Orientation, PageMargins, DocumentMode
 from volumenodex.canvas.paper_texture import TextureType
@@ -83,6 +83,12 @@ class RibbonBar(QWidget):
     saveCurrentStyleRequested = Signal()
     customStyleSelected = Signal(str)
 
+    # Script alignment & Indentation
+    scriptAlignmentRequested = Signal(str)
+    increaseIndentRequested = Signal()
+    decreaseIndentRequested = Signal()
+    firstLineIndentRequested = Signal()
+
     # Search & Replace signals
     findRequested = Signal()
     replaceRequested = Signal()
@@ -94,6 +100,10 @@ class RibbonBar(QWidget):
     symbolRequested = Signal()
     insertImageRequested = Signal()
     insertClipArtRequested = Signal()
+    insertTableRequested = Signal()
+    insertFootnoteRequested = Signal()
+    insertHeadnoteRequested = Signal()
+    headerFooterRequested = Signal()
 
     # Layout signals
     paperSizeChanged = Signal(PaperSizePreset)
@@ -126,6 +136,7 @@ class RibbonBar(QWidget):
     # View signals
     zenModeRequested = Signal()
     splitScreenRequested = Signal()
+    typewriterScrollToggled = Signal(bool)
     rulerToggled = Signal(bool)
     zoomChanged = Signal(float)
     themeChanged = Signal(str)
@@ -136,7 +147,34 @@ class RibbonBar(QWidget):
 
     # Document & Studio Header signals
     saveRequested = Signal()
+    printRequested = Signal()
     settingsRequested = Signal()
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(320, 126)
+
+    def _wrap_tab_scroll(self, content: QWidget) -> QScrollArea:
+        sa = QScrollArea()
+        sa.setWidgetResizable(True)
+        sa.setFrameShape(QFrame.Shape.NoFrame)
+        sa.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        sa.setStyleSheet("""
+            QScrollArea {
+                background: transparent;
+                border: none;
+            }
+            QScrollBar:horizontal {
+                height: 4px;
+                background: transparent;
+            }
+            QScrollBar::handle:horizontal {
+                background: #3b4261;
+                border-radius: 2px;
+            }
+        """)
+        sa.setWidget(content)
+        return sa
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -201,6 +239,35 @@ class RibbonBar(QWidget):
         """)
         self.btn_header_save.clicked.connect(self.saveRequested.emit)
         left_layout.addWidget(self.btn_header_save)
+
+        self.btn_header_print = QPushButton("Print")
+        self.btn_header_print.setObjectName("headerPrintBtn")
+        self.btn_header_print.setIcon(VectorIconFactory.create_icon("print" if hasattr(VectorIconFactory, "create_icon") else "file", color="#c0caf5", size=16))
+        self.btn_header_print.setIconSize(QSize(16, 16))
+        self.btn_header_print.setToolTip("Direct Physical Print or PDF Preview (Ctrl+P)")
+        self.btn_header_print.setStyleSheet("""
+            QPushButton#headerPrintBtn {
+                background-color: #24283b;
+                color: #c0caf5;
+                border: 1px solid #3b4261;
+                border-radius: 4px;
+                padding: 3px 10px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton#headerPrintBtn:hover {
+                background-color: #2e344e;
+                border-color: #7aa2f7;
+                color: #ffffff;
+            }
+            QPushButton#headerPrintBtn:pressed {
+                background-color: #7aa2f7;
+                color: #1a1b26;
+            }
+        """)
+        self.btn_header_print.clicked.connect(self.printRequested.emit)
+        left_layout.addWidget(self.btn_header_print)
+
         self.tab_widget.setCornerWidget(left_widget, Qt.Corner.TopLeftCorner)
 
         # Top-Right Header: Auto-Save status badge and Settings button
@@ -411,6 +478,35 @@ class RibbonBar(QWidget):
         self.btn_strike.clicked.connect(self.strikeToggled.emit)
         h_f2.addWidget(self.btn_strike)
 
+        # Superscript & Subscript Suite
+        self.btn_super = self._create_tool_button("", "Superscript (Ctrl+.)", text="x²", width=34)
+        self.btn_super.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        self.btn_super.clicked.connect(lambda: self.scriptAlignmentRequested.emit("super"))
+        script_menu = QMenu(self.btn_super)
+        script_menu.setStyleSheet("""
+            QMenu { background-color: #1f2335; color: #c0caf5; border: 1px solid #292e42; border-radius: 6px; padding: 4px; }
+            QMenu::item { padding: 4px 16px 4px 10px; border-radius: 4px; font-size: 11px; }
+            QMenu::item:selected { background-color: #2e344e; color: #7aa2f7; }
+        """)
+        act_sup = script_menu.addAction("x² Superscript (Ctrl+.)")
+        act_sup.triggered.connect(lambda: self.scriptAlignmentRequested.emit("super"))
+        act_sub = script_menu.addAction("x₂ Subscript (Ctrl+,)")
+        act_sub.triggered.connect(lambda: self.scriptAlignmentRequested.emit("sub"))
+        script_menu.addSeparator()
+        act_sup2 = script_menu.addAction("x²² Super-superscript")
+        act_sup2.triggered.connect(lambda: self.scriptAlignmentRequested.emit("super_super"))
+        act_sub2 = script_menu.addAction("x₂₂ Sub-subscript")
+        act_sub2.triggered.connect(lambda: self.scriptAlignmentRequested.emit("sub_sub"))
+        script_menu.addSeparator()
+        act_norm = script_menu.addAction("Clear Script Alignment (Normal)")
+        act_norm.triggered.connect(lambda: self.scriptAlignmentRequested.emit("normal"))
+        self.btn_super.setMenu(script_menu)
+        h_f2.addWidget(self.btn_super)
+
+        self.btn_sub = self._create_tool_button("", "Subscript (Ctrl+,)", text="x₂", width=28)
+        self.btn_sub.clicked.connect(lambda: self.scriptAlignmentRequested.emit("sub"))
+        h_f2.addWidget(self.btn_sub)
+
         # Text Color with Quick Palette Menu
         self.btn_text_color = self._create_tool_button("text_color", "Text Color", width=34)
         self.btn_text_color.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
@@ -538,9 +634,17 @@ class RibbonBar(QWidget):
         self.btn_align_justify = self._create_tool_button("align_justify", "Justify (Ctrl+J)", width=28)
         self.btn_align_justify.clicked.connect(self.alignJustifyRequested.emit)
         h_p1.addWidget(self.btn_align_justify)
+
+        self.btn_indent_dec = self._create_tool_button("", "Decrease Indent (Shift+Tab)", text="⇤", width=28)
+        self.btn_indent_dec.clicked.connect(self.decreaseIndentRequested.emit)
+        h_p1.addWidget(self.btn_indent_dec)
+
+        self.btn_indent_inc = self._create_tool_button("", "Increase Indent (Tab)", text="⇥", width=28)
+        self.btn_indent_inc.clicked.connect(self.increaseIndentRequested.emit)
+        h_p1.addWidget(self.btn_indent_inc)
         v_para.addLayout(h_p1)
 
-        # Row 2: Line Spacing
+        # Row 2: Line Spacing & First-Line Indent
         h_p2 = QHBoxLayout()
         self.spacing_combo = QComboBox()
         self.spacing_combo.addItem("1.0 Spacing", 1.0)
@@ -550,6 +654,10 @@ class RibbonBar(QWidget):
         self.spacing_combo.setCurrentText("1.45 Book")
         self.spacing_combo.currentIndexChanged.connect(lambda: self.lineSpacingChanged.emit(self.spacing_combo.currentData()))
         h_p2.addWidget(self.spacing_combo)
+
+        self.btn_first_line_indent = self._create_tool_button("", "Toggle 0.5 in First-Line Manuscript Indent", text="¶ Indent", width=58)
+        self.btn_first_line_indent.clicked.connect(self.firstLineIndentRequested.emit)
+        h_p2.addWidget(self.btn_first_line_indent)
         v_para.addLayout(h_p2)
 
         para_group.add_layout(v_para)
@@ -617,7 +725,7 @@ class RibbonBar(QWidget):
         layout.addWidget(editing_group)
 
         layout.addStretch()
-        self.tab_widget.addTab(tab, "Home")
+        self.tab_widget.addTab(self._wrap_tab_scroll(tab), "Home")
 
     def _create_style_button(self, style_name: str) -> QPushButton:
         btn = QPushButton(style_name)
@@ -730,9 +838,37 @@ class RibbonBar(QWidget):
 
         elem_group.add_layout(h_el)
         layout.addWidget(elem_group)
+        layout.addWidget(create_ribbon_separator())
+
+        # Tables Group
+        table_group = ModernRibbonGroup("Tables")
+        self.btn_table = self._create_tool_button("", "Insert and configure table grid", text="⊞ Table", width=85)
+        self.btn_table.clicked.connect(self.insertTableRequested.emit)
+        table_group.add_widget(self.btn_table)
+        layout.addWidget(table_group)
+        layout.addWidget(create_ribbon_separator())
+
+        # Notes & Headers Group
+        notes_group = ModernRibbonGroup("Notes & Headers")
+        h_notes = QHBoxLayout()
+        h_notes.setSpacing(4)
+        self.btn_footnote = self._create_tool_button("", "Insert Footnote at cursor (Ctrl+Alt+F)", text="Footnote", width=80)
+        self.btn_footnote.clicked.connect(self.insertFootnoteRequested.emit)
+        h_notes.addWidget(self.btn_footnote)
+
+        self.btn_headnote = self._create_tool_button("", "Insert Head Note / Epigraph banner", text="Head Note", width=80)
+        self.btn_headnote.clicked.connect(self.insertHeadnoteRequested.emit)
+        h_notes.addWidget(self.btn_headnote)
+
+        self.btn_header_footer = self._create_tool_button("", "Configure running top headers and bottom footers", text="Header & Footer", width=110)
+        self.btn_header_footer.clicked.connect(self.headerFooterRequested.emit)
+        h_notes.addWidget(self.btn_header_footer)
+
+        notes_group.add_layout(h_notes)
+        layout.addWidget(notes_group)
 
         layout.addStretch()
-        self.tab_widget.addTab(tab, "Insert")
+        self.tab_widget.addTab(self._wrap_tab_scroll(tab), "Insert")
 
     def _build_layout_tab(self) -> None:
         tab = QWidget()
@@ -838,7 +974,7 @@ class RibbonBar(QWidget):
         layout.addWidget(texture_group)
 
         layout.addStretch()
-        self.tab_widget.addTab(tab, "Layout")
+        self.tab_widget.addTab(self._wrap_tab_scroll(tab), "Layout")
 
     def _on_opacity_slider_changed(self, val: int) -> None:
         self.lbl_opacity.setText(f"{val}%")
@@ -878,7 +1014,7 @@ class RibbonBar(QWidget):
 
         layout.addStretch()
         self.story_tab_idx = self.tab_widget.count()
-        self.tab_widget.addTab(tab, "Story")
+        self.tab_widget.addTab(self._wrap_tab_scroll(tab), "Story")
 
     def set_document_mode(self, mode: DocumentMode) -> None:
         """Adapts the ribbon tabs and drawer button labels to the active document mode."""
@@ -1027,7 +1163,7 @@ class RibbonBar(QWidget):
         layout.addWidget(search_group)
 
         layout.addStretch()
-        self.tab_widget.addTab(tab, "Review")
+        self.tab_widget.addTab(self._wrap_tab_scroll(tab), "Review")
 
     def _build_aesthetics_tab(self) -> None:
         tab = QWidget()
@@ -1108,7 +1244,7 @@ class RibbonBar(QWidget):
         self.update_sound_presets()
 
         layout.addStretch()
-        self.tab_widget.addTab(tab, "Aesthetics")
+        self.tab_widget.addTab(self._wrap_tab_scroll(tab), "Aesthetics")
 
     def update_sound_presets(self, audio_engine=None) -> None:
         """Populates typewriter and ambient combo boxes with only variations that have sound files."""
@@ -1161,9 +1297,21 @@ class RibbonBar(QWidget):
         layout.setSpacing(6)
 
         modes_group = ModernRibbonGroup("Operating Modes")
+        h_modes = QHBoxLayout()
+        h_modes.setSpacing(4)
         self.btn_zen = self._create_tool_button("zen", "Distraction-Free Zen Mode (F11)", text="Zen Focus", width=105)
         self.btn_zen.clicked.connect(self.zenModeRequested.emit)
-        modes_group.add_widget(self.btn_zen)
+        h_modes.addWidget(self.btn_zen)
+
+        self.btn_split_screen = self._create_tool_button("split_screen", "Toggle Dual Split-Screen Workspace (Ctrl+\\)", text="Split Screen", width=110, checkable=True)
+        self.btn_split_screen.clicked.connect(self.splitScreenRequested.emit)
+        h_modes.addWidget(self.btn_split_screen)
+
+        self.chk_typewriter = self._create_tool_button("", "Typewriter Scrolling: Keep active typing cursor centered vertically", text="Typewriter Scroll", width=125, checkable=True)
+        self.chk_typewriter.toggled.connect(self.typewriterScrollToggled.emit)
+        h_modes.addWidget(self.chk_typewriter)
+
+        modes_group.add_layout(h_modes)
         layout.addWidget(modes_group)
         layout.addWidget(create_ribbon_separator())
 
@@ -1212,7 +1360,7 @@ class RibbonBar(QWidget):
         layout.addWidget(disp_group)
 
         layout.addStretch()
-        self.tab_widget.addTab(tab, "View")
+        self.tab_widget.addTab(self._wrap_tab_scroll(tab), "View")
 
 
 # Alias for backwards compatibility / semantic naming

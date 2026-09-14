@@ -139,6 +139,14 @@ class PageLayoutModel:
     def printable_height_px(self) -> int:
         return max(100, self.page_height_px - self.margin_top_px - self.margin_bottom_px)
 
+    @property
+    def printable_width_px_base(self) -> float:
+        return max(100.0, self.page_width_px_base - (self.margins.left + self.margins.right) * DPI_SCREEN)
+
+    @property
+    def printable_height_px_base(self) -> float:
+        return max(100.0, self.page_height_px_base - (self.margins.top + self.margins.bottom) * DPI_SCREEN)
+
 
 @dataclass
 class DocumentStatistics:
@@ -167,3 +175,8 @@ class DocumentStatistics:
             page_count=max(1, page_count),
             reading_time_minutes=reading_time,
         )
+
+    @property
+    def words(self) -> int:
+        return self.word_count
+

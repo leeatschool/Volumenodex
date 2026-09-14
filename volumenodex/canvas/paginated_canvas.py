@@ -9,7 +9,8 @@ from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QFont, QTextCursor, QTextDocument,
     QAbstractTextDocumentLayout, QTextCharFormat, QTextBlockFormat,
     QTextListFormat, QKeySequence, QLinearGradient, QRadialGradient,
-    QPainterPath, QClipboard, QGuiApplication, QImage, QTextImageFormat, QPixmap, QIcon
+    QPainterPath, QClipboard, QGuiApplication, QImage, QTextImageFormat, QPixmap, QIcon,
+    QTextTableFormat, QTextTable, QTextLength
 )
 from PySide6.QtWidgets import (
     QAbstractScrollArea, QScrollBar, QApplication, QMenu
@@ -18,6 +19,9 @@ from PySide6.QtWidgets import (
 from volumenodex.core.document_model import PageLayoutModel, DPI_SCREEN, PageMargins
 from volumenodex.canvas.paper_texture import PaperTextureEngine, TextureType
 from volumenodex.core.theme_manager import ThemeManager
+from volumenodex.core.header_footer_model import HeaderFooterModel, PageHeaderFooterConfig
+from volumenodex.core.note_model import NoteManager, Footnote
+from volumenodex.review.lens_engine import LensFinding
 
 
 class PaginatedCanvas(QAbstractScrollArea):
@@ -29,6 +33,8 @@ class PaginatedCanvas(QAbstractScrollArea):
     pageOffsetChanged = Signal(int)
     addToDictionaryRequested = Signal(str)
     ignoreWordRequested = Signal(str)
+    zoomRequested = Signal(float)
+    headerFooterEditRequested = Signal(int)
 
     def __init__(
         self,
@@ -45,6 +51,11 @@ class PaginatedCanvas(QAbstractScrollArea):
         self.dark_paper = False
         self.show_margin_guides = True
         self.show_crop_marks = True
+        self.typewriter_scrolling = False
+        self.header_footer_model = HeaderFooterModel()
+        self.note_manager = NoteManager()
+        self.story_title = ""
+        self.story_author = ""
 
         # Document Engine
         self._doc = QTextDocument(self)
@@ -93,6 +104,19 @@ class PaginatedCanvas(QAbstractScrollArea):
     def document(self) -> QTextDocument:
         return self._doc
 
+    def set_document(self, doc: QTextDocument) -> None:
+        """Shares or binds an existing QTextDocument to this canvas."""
+        try:
+            self._doc.contentsChanged.disconnect(self._on_doc_contents_changed)
+        except Exception:
+            pass
+        self._doc = doc
+        self._cursor = QTextCursor(self._doc)
+        self._doc.contentsChanged.connect(self._on_doc_contents_changed)
+        self.sync_document_geometry()
+        self._update_scroll_bars()
+        self.viewport().update()
+
     @property
     def cursor(self) -> QTextCursor:
         return self._cursor
@@ -138,6 +162,8 @@ class PaginatedCanvas(QAbstractScrollArea):
     def _reset_cursor_blink(self) -> None:
         self._cursor_visible = True
         self._blink_timer.start(500)
+        if getattr(self, "typewriter_scrolling", False):
+            self._apply_typewriter_scrolling()
         self.viewport().update()
 
     def _get_page_rect(self, page_index: int) -> QRectF:
@@ -259,8 +285,10 @@ class PaginatedCanvas(QAbstractScrollArea):
             if self.show_crop_marks:
                 self._draw_crop_marks(painter, screen_page_rect)
 
-            # 7. Running Page Footer
-            self._draw_page_footer(painter, screen_page_rect, p + 1)
+            # 7. Running Page Header & Footer
+            self._draw_page_header(painter, screen_page_rect, p + 1, total_pages)
+            self._draw_page_footer(painter, screen_page_rect, p + 1, total_pages)
+            self._draw_page_footnotes(painter, screen_page_rect, p + 1)
 
             # 8. Sliced Text Content & Selection
             print_rect = self._get_printable_rect(p)
@@ -381,7 +409,42 @@ class PaginatedCanvas(QAbstractScrollArea):
         p.drawLine(rect.right() - mx, rect.bottom() - my, rect.right() - mx + 6, rect.bottom() - my)
         p.drawLine(rect.right() - mx, rect.bottom() - my, rect.right() - mx, rect.bottom() - my + 6)
 
-    def _draw_page_footer(self, p: QPainter, rect: QRectF, page_num: int) -> None:
+    def _draw_page_header(self, p: QPainter, rect: QRectF, page_num: int, total_pages: int) -> None:
+        cfg = self.header_footer_model.get_config_for_page(page_num)
+        if cfg.suppressed:
+            return
+        if not (cfg.header_left or cfg.header_center or cfg.header_right):
+            return
+
+        p.save()
+        font = QFont("Georgia", 8)
+        font.setStyleHint(QFont.StyleHint.Serif)
+        p.setFont(font)
+        col = QColor(140, 145, 165, 140) if not self.dark_paper else QColor(160, 165, 185, 120)
+        p.setPen(col)
+
+        mx = self.layout_model.margin_left_px
+        header_y = rect.top() + int(self.layout_model.margin_top_px * 0.45)
+        hdr_rect = QRectF(rect.x() + mx, header_y - 10, rect.width() - (2 * mx), 20)
+
+        left_text = self.header_footer_model.expand_tokens(cfg.header_left, page_num, total_pages, self.story_title, self.story_author)
+        center_text = self.header_footer_model.expand_tokens(cfg.header_center, page_num, total_pages, self.story_title, self.story_author)
+        right_text = self.header_footer_model.expand_tokens(cfg.header_right, page_num, total_pages, self.story_title, self.story_author)
+
+        if left_text:
+            p.drawText(hdr_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, left_text)
+        if center_text:
+            p.drawText(hdr_rect, Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter, center_text)
+        if right_text:
+            p.drawText(hdr_rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, right_text)
+
+        p.restore()
+
+    def _draw_page_footer(self, p: QPainter, rect: QRectF, page_num: int, total_pages: int = 1) -> None:
+        cfg = self.header_footer_model.get_config_for_page(page_num)
+        if cfg.suppressed:
+            return
+
         p.save()
         font = QFont("Georgia", 9)
         font.setStyleHint(QFont.StyleHint.Serif)
@@ -389,8 +452,50 @@ class PaginatedCanvas(QAbstractScrollArea):
         footer_col = QColor(140, 145, 165, 140) if not self.dark_paper else QColor(160, 165, 185, 120)
         p.setPen(footer_col)
 
+        mx = self.layout_model.margin_left_px
         footer_y = rect.bottom() - int(self.layout_model.margin_bottom_px * 0.45)
-        p.drawText(QRectF(rect.x(), footer_y - 10, rect.width(), 20), Qt.AlignmentFlag.AlignCenter, f"— {page_num} —")
+        ftr_rect = QRectF(rect.x() + mx, footer_y - 10, rect.width() - (2 * mx), 20)
+
+        left_text = self.header_footer_model.expand_tokens(cfg.footer_left, page_num, total_pages, self.story_title, self.story_author)
+        center_text = self.header_footer_model.expand_tokens(cfg.footer_center, page_num, total_pages, self.story_title, self.story_author)
+        right_text = self.header_footer_model.expand_tokens(cfg.footer_right, page_num, total_pages, self.story_title, self.story_author)
+
+        if left_text:
+            p.drawText(ftr_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, left_text)
+        if center_text:
+            p.drawText(ftr_rect, Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter, center_text)
+        if right_text:
+            p.drawText(ftr_rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, right_text)
+
+        p.restore()
+
+    def _draw_page_footnotes(self, p: QPainter, rect: QRectF, page_num: int) -> None:
+        if not hasattr(self, "note_manager") or not self.note_manager:
+            return
+        notes = self.note_manager.get_footnotes_for_page(page_num)
+        if not notes:
+            return
+
+        p.save()
+        mx = self.layout_model.margin_left_px
+        my = self.layout_model.margin_bottom_px
+        pw_print = self.layout_model.printable_width_px
+
+        start_y = rect.bottom() - my + 6
+        p.setPen(QPen(QColor(130, 140, 170, 80), 1))
+        p.drawLine(int(rect.x() + mx), int(start_y), int(rect.x() + mx + 60), int(start_y))
+
+        fn_font = QFont("Georgia", 8)
+        p.setFont(fn_font)
+        fn_color = QColor(120, 125, 145) if not self.dark_paper else QColor(170, 175, 195)
+        p.setPen(fn_color)
+
+        cur_y = start_y + 4
+        for fn in notes[:3]:
+            fn_text = f"{fn.marker}. {fn.text}"
+            p.drawText(QRectF(rect.x() + mx, cur_y, pw_print, 14), Qt.AlignmentFlag.AlignLeft, fn_text)
+            cur_y += 14
+
         p.restore()
 
     # --- Mouse Interaction & Hit-Testing Across Discrete Sheets ---
@@ -419,13 +524,42 @@ class PaginatedCanvas(QAbstractScrollArea):
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            pos = self._screen_point_to_doc_position(event.position())
+            pt = event.position() if hasattr(event, "position") else event.pos()
+            # Check if double-clicked in header or footer margin
+            sx = self.horizontalScrollBar().value()
+            sy = self.verticalScrollBar().value()
+            click_y = pt.y() + sy
+            top_padding = 36
+            gutter = 36
+            ph = self.layout_model.page_height_px
+            page_stride = ph + gutter
+            target_page = max(0, min(self._total_pages() - 1, int((click_y - top_padding) // page_stride)))
+            print_rect = self._get_printable_rect(target_page)
+            page_rect = self._get_page_rect(target_page)
+
+            if page_rect.contains(pt.x() + sx, click_y):
+                if click_y < print_rect.top() or click_y > print_rect.bottom():
+                    self.headerFooterEditRequested.emit(target_page + 1)
+                    return
+
+            pos = self._screen_point_to_doc_position(pt)
             if pos is not None:
                 self._cursor.setPosition(pos)
                 self._cursor.select(QTextCursor.SelectionType.WordUnderCursor)
                 self._reset_cursor_blink()
                 self.cursorPositionChanged.emit()
                 self.viewport().update()
+
+    def wheelEvent(self, event):
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            delta = event.angleDelta().y()
+            step = 0.05 if delta > 0 else -0.05
+            new_zoom = max(0.25, min(3.0, round(self.layout_model.zoom + step, 2)))
+            if new_zoom != self.layout_model.zoom:
+                self.zoomRequested.emit(new_zoom)
+            event.accept()
+        else:
+            super().wheelEvent(event)
 
     def _screen_point_to_doc_position(self, screen_pt: QPointF) -> Optional[int]:
         sx = self.horizontalScrollBar().value()
@@ -569,6 +703,20 @@ class PaginatedCanvas(QAbstractScrollArea):
             else:
                 self.show_find(replace_mode=False)
 
+        # Tab / Backtab Indentation & Table Navigation
+        elif key in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
+            if is_shift or key == Qt.Key.Key_Backtab:
+                self.decrease_indent()
+            else:
+                table = self._cursor.currentTable()
+                if table:
+                    self._cursor.movePosition(QTextCursor.MoveOperation.NextCell)
+                elif self._cursor.hasSelection() or self._cursor.atBlockStart():
+                    self.increase_indent()
+                else:
+                    self._cursor.insertText("    ")
+            self.keystrokeHappened.emit(False, False)
+
         # 4. Text Input
         elif event.text() and not is_ctrl:
             typed_char = event.text()
@@ -709,6 +857,207 @@ class PaginatedCanvas(QAbstractScrollArea):
                 fmt.setIndent(indent)
             self._cursor.createList(fmt)
             self._cursor.endEditBlock()
+
+    # --- Script Formatting (Superscript, Subscript, Super-superscript, Sub-subscript) ---
+    def set_script_alignment(self, script_type: str) -> None:
+        """Sets vertical script alignment: 'super', 'sub', 'super_super', 'sub_sub', or 'normal'."""
+        fmt = QTextCharFormat()
+        current_fmt = self._cursor.charFormat()
+        base_size = current_fmt.fontPointSize() if current_fmt.fontPointSize() > 0 else 12.0
+
+        if script_type == "super":
+            fmt.setVerticalAlignment(QTextCharFormat.VerticalAlignment.AlignSuperScript)
+            fmt.setFontPointSize(max(6.5, round(base_size * 0.78, 1)))
+        elif script_type == "sub":
+            fmt.setVerticalAlignment(QTextCharFormat.VerticalAlignment.AlignSubScript)
+            fmt.setFontPointSize(max(6.5, round(base_size * 0.78, 1)))
+        elif script_type == "super_super":
+            fmt.setVerticalAlignment(QTextCharFormat.VerticalAlignment.AlignSuperScript)
+            fmt.setFontPointSize(max(5.0, round(base_size * 0.55, 1)))
+        elif script_type == "sub_sub":
+            fmt.setVerticalAlignment(QTextCharFormat.VerticalAlignment.AlignSubScript)
+            fmt.setFontPointSize(max(5.0, round(base_size * 0.55, 1)))
+        else:
+            fmt.setVerticalAlignment(QTextCharFormat.VerticalAlignment.AlignNormal)
+            curr_align = current_fmt.verticalAlignment()
+            if curr_align in (QTextCharFormat.VerticalAlignment.AlignSuperScript, QTextCharFormat.VerticalAlignment.AlignSubScript):
+                fmt.setFontPointSize(round(base_size / 0.78, 1))
+
+        self._cursor.mergeCharFormat(fmt)
+        self.viewport().update()
+
+    # --- Robust Indentation Controls ---
+    def increase_indent(self) -> None:
+        """Increases block left indentation level."""
+        bf = self._cursor.blockFormat()
+        bf.setIndent(bf.indent() + 1)
+        self._cursor.setBlockFormat(bf)
+        self.viewport().update()
+
+    def decrease_indent(self) -> None:
+        """Decreases block left indentation level."""
+        bf = self._cursor.blockFormat()
+        if bf.indent() > 0:
+            bf.setIndent(bf.indent() - 1)
+            self._cursor.setBlockFormat(bf)
+            self.viewport().update()
+
+    def set_first_line_indent(self, indent_pt: float) -> None:
+        """Sets or toggles first-line paragraph indent (e.g., 36.0 pt = 0.5 in)."""
+        bf = self._cursor.blockFormat()
+        new_indent = 0.0 if bf.textIndent() > 1.0 else indent_pt
+        bf.setTextIndent(new_indent)
+        self._cursor.setBlockFormat(bf)
+        self.viewport().update()
+
+    # --- Table Builder & Manipulation ---
+    def insert_table(
+        self,
+        rows: int,
+        cols: int,
+        has_header: bool = True,
+        border_width: int = 1,
+        padding: int = 6,
+        cell_padding: Optional[int] = None,
+    ) -> Optional[QTextTable]:
+        """Inserts a structured QTextTable at the current cursor."""
+        if cell_padding is not None:
+            padding = cell_padding
+        tf = QTextTableFormat()
+        tf.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        tf.setCellPadding(padding)
+        tf.setCellSpacing(0)
+        tf.setBorder(border_width)
+        tf.setBorderStyle(
+            QTextTableFormat.BorderStyle.BorderStyle_Solid if border_width > 0
+            else QTextTableFormat.BorderStyle.BorderStyle_None
+        )
+        tf.setBorderBrush(QBrush(QColor(100, 110, 140, 120)))
+
+        table = self._cursor.insertTable(rows, cols, tf)
+        if has_header and table:
+            header_col = QColor(122, 162, 247, 30) if not self.dark_paper else QColor(36, 40, 59, 200)
+            for col in range(cols):
+                cell = table.cellAt(0, col)
+                cf = cell.format()
+                cf.setBackground(header_col)
+                cell.setFormat(cf)
+
+        self.sync_document_geometry()
+        self.viewport().update()
+        return table
+
+    def table_insert_row_above(self) -> None:
+        table = self._cursor.currentTable()
+        if table:
+            cell = table.cellAt(self._cursor)
+            if cell.isValid():
+                table.insertRows(cell.row(), 1)
+                self.sync_document_geometry()
+                self.viewport().update()
+
+    def table_insert_row_below(self) -> None:
+        table = self._cursor.currentTable()
+        if table:
+            cell = table.cellAt(self._cursor)
+            if cell.isValid():
+                table.insertRows(cell.row() + 1, 1)
+                self.sync_document_geometry()
+                self.viewport().update()
+
+    def table_insert_col_left(self) -> None:
+        table = self._cursor.currentTable()
+        if table:
+            cell = table.cellAt(self._cursor)
+            if cell.isValid():
+                table.insertColumns(cell.column(), 1)
+                self.sync_document_geometry()
+                self.viewport().update()
+
+    def table_insert_col_right(self) -> None:
+        table = self._cursor.currentTable()
+        if table:
+            cell = table.cellAt(self._cursor)
+            if cell.isValid():
+                table.insertColumns(cell.column() + 1, 1)
+                self.sync_document_geometry()
+                self.viewport().update()
+
+    def table_remove_row(self) -> None:
+        table = self._cursor.currentTable()
+        if table:
+            cell = table.cellAt(self._cursor)
+            if cell.isValid() and table.rows() > 1:
+                table.removeRows(cell.row(), 1)
+                self.sync_document_geometry()
+                self.viewport().update()
+
+    def table_remove_col(self) -> None:
+        table = self._cursor.currentTable()
+        if table:
+            cell = table.cellAt(self._cursor)
+            if cell.isValid() and table.columns() > 1:
+                table.removeColumns(cell.column(), 1)
+                self.sync_document_geometry()
+                self.viewport().update()
+
+    def table_remove_table(self) -> None:
+        table = self._cursor.currentTable()
+        if table:
+            cur = table.firstCursorPosition()
+            cur.movePosition(QTextCursor.MoveOperation.PreviousCharacter)
+            table_len = table.lastCursorPosition().position() - cur.position()
+            cur.movePosition(QTextCursor.MoveOperation.NextCharacter, QTextCursor.MoveMode.KeepAnchor, table_len + 1)
+            cur.removeSelectedText()
+            self.sync_document_geometry()
+            self.viewport().update()
+
+    # --- Footnotes & Head Notes ---
+    def insert_footnote(self, text: str) -> None:
+        """Inserts an in-text superscript marker linked to footnote text."""
+        p_idx = self._cursor_page_index()
+        anchor = self._cursor.position()
+        fn = self.note_manager.add_footnote(text=text, anchor_pos=anchor, page_num=p_idx + 1)
+
+        # Insert superscript marker [1] in text
+        fmt = QTextCharFormat()
+        fmt.setVerticalAlignment(QTextCharFormat.VerticalAlignment.AlignSuperScript)
+        fmt.setFontPointSize(8.0)
+        fmt.setForeground(QColor("#7aa2f7"))
+        self._cursor.insertText(f"[{fn.marker}]", fmt)
+        self.viewport().update()
+
+    def insert_headnote(self, section_title: str, content: str) -> None:
+        """Inserts a styled head note banner above current section."""
+        self.note_manager.add_headnote(section_title, content)
+        bf = QTextBlockFormat()
+        bf.setTopMargin(10)
+        bf.setBottomMargin(10)
+        bf.setBackground(QColor(122, 162, 247, 18))
+        self._cursor.insertBlock(bf)
+
+        cf = QTextCharFormat()
+        cf.setFontItalic(True)
+        cf.setFontPointSize(10.5)
+        cf.setForeground(QColor(160, 165, 190) if self.dark_paper else QColor(70, 75, 95))
+        self._cursor.insertText(f"§ {section_title} — {content}", cf)
+        self._cursor.insertBlock()
+        self.viewport().update()
+
+    # --- Typewriter Scrolling ---
+    def _apply_typewriter_scrolling(self) -> None:
+        """Keeps the active typing line centered vertically in the canvas viewport."""
+        if not self.typewriter_scrolling or not self.hasFocus():
+            return
+        p_idx = self._cursor_page_index()
+        print_rect = self._get_printable_rect(p_idx)
+        cursor_rect = self._doc.documentLayout().cursorBounds(self._cursor)
+        ph_print = self.layout_model.printable_height_px
+        doc_cursor_y = cursor_rect.top() - (p_idx * ph_print)
+        cursor_screen_y = print_rect.top() + doc_cursor_y
+        vh = self.viewport().height()
+        target_val = int(cursor_screen_y - (vh / 2))
+        self.verticalScrollBar().setValue(max(0, target_val))
 
     def apply_style(self, style_name: str) -> None:
         bf = self._cursor.blockFormat()
@@ -1064,7 +1413,17 @@ class PaginatedCanvas(QAbstractScrollArea):
 
     def contextMenuEvent(self, event):
         """Context menu with intelligent review fixes, spelling suggestions, color options, and editing."""
-        pos = self._screen_point_to_doc_position(event.position())
+        if hasattr(event, "pos"):
+            screen_pt = event.pos()
+        elif hasattr(event, "position"):
+            screen_pt = event.position()
+        else:
+            screen_pt = event.globalPos()
+
+        pos = self._screen_point_to_doc_position(screen_pt)
+        if pos is not None:
+            self._cursor.setPosition(pos)
+            self.cursorPositionChanged.emit()
 
         menu = QMenu(self)
         menu.setStyleSheet("""
@@ -1090,18 +1449,62 @@ class PaginatedCanvas(QAbstractScrollArea):
             }
         """)
 
-        # Find all review findings encompassing click position
+        # 1. Table Context Actions if clicked inside a table
+        table = self._cursor.currentTable()
+        if table:
+            tbl_menu = menu.addMenu("📊 Table Options")
+            act_r_above = tbl_menu.addAction("➕ Insert Row Above")
+            act_r_above.triggered.connect(self.table_insert_row_above)
+            act_r_below = tbl_menu.addAction("➕ Insert Row Below")
+            act_r_below.triggered.connect(self.table_insert_row_below)
+
+            tbl_menu.addSeparator()
+            act_c_left = tbl_menu.addAction("➕ Insert Column Left")
+            act_c_left.triggered.connect(self.table_insert_col_left)
+            act_c_right = tbl_menu.addAction("➕ Insert Column Right")
+            act_c_right.triggered.connect(self.table_insert_col_right)
+
+            tbl_menu.addSeparator()
+            act_del_r = tbl_menu.addAction("🗑️ Delete Row")
+            act_del_r.triggered.connect(self.table_remove_row)
+            act_del_c = tbl_menu.addAction("🗑️ Delete Column")
+            act_del_c.triggered.connect(self.table_remove_col)
+            act_del_t = tbl_menu.addAction("🗑️ Delete Entire Table")
+            act_del_t.triggered.connect(self.table_remove_table)
+            menu.addSeparator()
+
+        # 2. Find review findings encompassing click position
         matched_findings = []
         if pos is not None and hasattr(self, "_lens_findings") and self._lens_findings:
             for f in self._lens_findings:
-                if f.start_pos <= pos <= f.end_pos:
+                if f.start_pos <= pos <= f.end_pos or (pos > 0 and f.start_pos <= pos - 1 <= f.end_pos):
                     matched_findings.append(f)
+
+        # On-the-fly live spelling check if cursor is on an unrecognized word
+        if not matched_findings and getattr(self, "spell_engine", None) and pos is not None:
+            c_word = QTextCursor(self._doc)
+            c_word.setPosition(pos)
+            c_word.select(QTextCursor.SelectionType.WordUnderCursor)
+            word = c_word.selectedText().strip()
+            if word and len(word) > 1 and word.isalpha() and not self.spell_engine.check_word(word):
+                sugs = self.spell_engine.get_suggestions(word, limit=4)
+                w_start = c_word.selectionStart()
+                w_end = c_word.selectionEnd()
+                f_live = LensFinding(
+                    lens_type="spelling",
+                    start_pos=w_start,
+                    end_pos=w_end,
+                    text=word,
+                    message=f"Possible spelling mistake: '{word}'",
+                    color=QColor(247, 118, 142, 60),
+                    suggestions=sugs,
+                )
+                matched_findings.append(f_live)
 
         if matched_findings:
             for f in matched_findings:
                 lens_type = getattr(f, "lens_type", "")
                 if lens_type == "spelling":
-                    # Lazily resolve suggestions on demand if not yet computed
                     if not f.suggestions and getattr(self, "spell_engine", None):
                         f.suggestions = self.spell_engine.get_suggestions(f.text, limit=4)
 
