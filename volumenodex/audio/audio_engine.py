@@ -31,27 +31,68 @@ class AudioEngine(QObject):
 
     def __init__(self, base_dir: Optional[str] = None, parent=None):
         super().__init__(parent)
-        self.base_dir = base_dir or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.base_dir = self._resolve_base_dir(base_dir)
         self.sounds_dir = os.path.join(self.base_dir, "assets", "sounds")
         os.makedirs(self.sounds_dir, exist_ok=True)
 
         self.typewriter_preset = TypewriterSoundPreset.MANUAL
         self.ambient_preset = AmbientSoundPreset.OFF
 
-        # Keystroke low-latency sound player
-        self._key_effect = QSoundEffect(self)
-        self._key_effect.setVolume(0.5)
+        self._effects_volume = 0.5
+        self._ambient_volume = 0.35
 
-        # Bell effect for Enter / Margins
-        self._bell_effect = QSoundEffect(self)
-        self._bell_effect.setVolume(0.4)
+        # Preloaded low-latency sound effects for keystrokes & bell
+        self._effects: Dict[str, QSoundEffect] = {}
+        self._preload_effects()
 
         # Ambient background loop player
         self._ambient_player = QMediaPlayer(self)
         self._ambient_output = QAudioOutput(self)
         self._ambient_player.setAudioOutput(self._ambient_output)
         self._ambient_player.setLoops(QMediaPlayer.Infinite)
-        self._ambient_output.setVolume(0.35)
+        self._ambient_output.setVolume(self._ambient_volume)
+
+    @staticmethod
+    def _resolve_base_dir(base_dir: Optional[str] = None) -> str:
+        if base_dir and os.path.exists(os.path.join(base_dir, "assets", "sounds")):
+            return base_dir
+        cur = os.path.abspath(__file__)
+        for _ in range(5):
+            cur = os.path.dirname(cur)
+            if os.path.exists(os.path.join(cur, "pyproject.toml")) and os.path.exists(os.path.join(cur, "assets", "sounds")):
+                return cur
+        # Fallback to repo root 3 levels up from volumenodex/audio/audio_engine.py
+        return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+    def _find_sound_file(self, base_name: str) -> Optional[str]:
+        """Finds sound file matching base_name with .wav, .mp3, .ogg, or exact filename."""
+        root, ext = os.path.splitext(base_name)
+        extensions = [ext] if ext else [".wav", ".mp3", ".ogg", ".flac", ".m4a"]
+        for test_ext in extensions:
+            target = root + test_ext
+            path = os.path.join(self.sounds_dir, target)
+            if os.path.exists(path):
+                return path
+        return None
+
+    def _preload_effects(self) -> None:
+        """Preloads uncompressed .wav sound effects for zero-latency keystroke playback."""
+        effect_names = [
+            "manual_click1", "manual_click2", "manual_click3",
+            "electric_click", "soft_mechanical", "bell"
+        ]
+        for name in effect_names:
+            file_path = self._find_sound_file(name)
+            if file_path and file_path.lower().endswith(".wav"):
+                eff = QSoundEffect(self)
+                eff.setSource(QUrl.fromLocalFile(file_path))
+                eff.setVolume(self._effects_volume * (0.8 if name == "bell" else 1.0))
+                self._effects[name] = eff
+
+    def reload_sounds(self) -> None:
+        """Re-scans sounds directory to load newly added audio files."""
+        self._effects.clear()
+        self._preload_effects()
 
     def set_typewriter_preset(self, preset: TypewriterSoundPreset) -> None:
         self.typewriter_preset = preset
@@ -62,21 +103,20 @@ class AudioEngine(QObject):
             self._ambient_player.stop()
             return
 
-        # Map preset to file name
-        preset_files = {
-            AmbientSoundPreset.RAIN: "rain.mp3",
-            AmbientSoundPreset.LIBRARY: "library.mp3",
-            AmbientSoundPreset.FIREPLACE: "fireplace.mp3",
-            AmbientSoundPreset.COFFEE_SHOP: "coffee_shop.mp3",
-            AmbientSoundPreset.CABIN: "cabin.mp3",
-            AmbientSoundPreset.CAMPING: "camping.mp3",
-            AmbientSoundPreset.BROWN_NOISE: "brown_noise.mp3",
+        preset_names = {
+            AmbientSoundPreset.RAIN: "rain",
+            AmbientSoundPreset.LIBRARY: "library",
+            AmbientSoundPreset.FIREPLACE: "fireplace",
+            AmbientSoundPreset.COFFEE_SHOP: "coffee_shop",
+            AmbientSoundPreset.CABIN: "cabin",
+            AmbientSoundPreset.CAMPING: "camping",
+            AmbientSoundPreset.BROWN_NOISE: "brown_noise",
         }
 
-        filename = preset_files.get(preset)
-        if filename:
-            file_path = os.path.join(self.sounds_dir, filename)
-            if os.path.exists(file_path):
+        name = preset_names.get(preset)
+        if name:
+            file_path = self._find_sound_file(name)
+            if file_path:
                 self._ambient_player.setSource(QUrl.fromLocalFile(file_path))
                 self._ambient_player.play()
             else:
@@ -87,31 +127,29 @@ class AudioEngine(QObject):
             return
 
         if is_return:
-            bell_path = os.path.join(self.sounds_dir, "bell.mp3")
-            if os.path.exists(bell_path):
-                self._bell_effect.setSource(QUrl.fromLocalFile(bell_path))
-                self._bell_effect.play()
-                return
+            if "bell" in self._effects:
+                self._effects["bell"].play()
+            return
 
-        # Choose sound file based on preset
+        # Choose sound effect based on preset
         if self.typewriter_preset == TypewriterSoundPreset.MANUAL:
             sample_num = random.randint(1, 3)
-            sample_name = f"manual_click{sample_num}.mp3"
+            key = f"manual_click{sample_num}"
         elif self.typewriter_preset == TypewriterSoundPreset.ELECTRIC:
-            sample_name = "electric_click.mp3"
+            key = "electric_click"
         else:  # Soft mechanical
-            sample_name = "soft_mechanical.mp3"
+            key = "soft_mechanical"
 
-        sample_path = os.path.join(self.sounds_dir, sample_name)
-        if os.path.exists(sample_path):
-            self._key_effect.setSource(QUrl.fromLocalFile(sample_path))
-            self._key_effect.play()
+        if key in self._effects:
+            self._effects[key].play()
 
     def set_ambient_volume(self, volume_percent: int) -> None:
         vol = max(0.0, min(1.0, volume_percent / 100.0))
+        self._ambient_volume = vol
         self._ambient_output.setVolume(vol)
 
     def set_effects_volume(self, volume_percent: int) -> None:
         vol = max(0.0, min(1.0, volume_percent / 100.0))
-        self._key_effect.setVolume(vol)
-        self._bell_effect.setVolume(vol * 0.8)
+        self._effects_volume = vol
+        for name, eff in self._effects.items():
+            eff.setVolume(vol * (0.8 if name == "bell" else 1.0))

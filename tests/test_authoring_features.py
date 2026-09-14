@@ -153,7 +153,7 @@ def test_heading_3_4_5_and_custom_styles(app):
         "bottom_margin": 10
     }
     ed.apply_custom_style(custom_style)
-    assert ed.currentCharFormat().fontFamily() == "Arial"
+    assert ("Arial" in ed.currentCharFormat().fontFamilies()) or ed.currentCharFormat().fontFamily() == "Arial"
     assert int(ed.currentCharFormat().fontPointSize()) == 24
     assert ed.fontWeight() >= 700
     assert ed.fontUnderline() is True

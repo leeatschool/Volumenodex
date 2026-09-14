@@ -50,6 +50,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Volumenodex — Untitled Document")
         self.resize(1280, 850)
+        self._setup_window_icon()
 
         # Core Engines
         self.theme_manager = ThemeManager("Deep Midnight Studio", dark_paper=False)
@@ -203,6 +204,21 @@ class MainWindow(QMainWindow):
         self.ribbon.btn_adverbs.setChecked(True)
         self.ribbon.btn_passive.setChecked(True)
         self.ribbon.btn_filler.setChecked(True)
+
+    def _setup_window_icon(self) -> None:
+        """Sets application window and taskbar icon from bundled assets or system downloads."""
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        icon_candidates = [
+            os.path.join(repo_root, "assets", "icon.png"),
+            os.path.join(repo_root, "volumenodex", "resources", "app_icon.png"),
+            r"C:\Users\thele\Downloads\WHCP.png",
+        ]
+        for p in icon_candidates:
+            if os.path.exists(p):
+                ico = QIcon(p)
+                if not ico.isNull():
+                    self.setWindowIcon(ico)
+                    break
 
     def _init_menu_bar(self) -> None:
         menu_bar = self.menuBar()
@@ -456,10 +472,11 @@ class MainWindow(QMainWindow):
         self.pet_dock.dismissRequested.connect(self._on_pet_dock_dismissed)
         self.pet_engine.moodChanged.connect(self._on_pet_mood_changed)
 
-        # Sensory Audio connections
         ed.keystrokeHappened.connect(self.audio_engine.play_keystroke)
         self.ribbon.typewriterSoundChanged.connect(self.audio_engine.set_typewriter_preset)
         self.ribbon.ambientSoundChanged.connect(self.audio_engine.set_ambient_preset)
+        self.ribbon.typewriterVolumeChanged.connect(self.audio_engine.set_effects_volume)
+        self.ribbon.ambientVolumeChanged.connect(self.audio_engine.set_ambient_volume)
 
         # Corkboard mode switching & synchronization
         self.ribbon.btn_corkboard.clicked.connect(self.toggle_corkboard_mode)

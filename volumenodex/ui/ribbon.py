@@ -131,6 +131,8 @@ class RibbonBar(QWidget):
     themeChanged = Signal(str)
     typewriterSoundChanged = Signal(TypewriterSoundPreset)
     ambientSoundChanged = Signal(AmbientSoundPreset)
+    typewriterVolumeChanged = Signal(int)
+    ambientVolumeChanged = Signal(int)
 
     # Document & Studio Header signals
     saveRequested = Signal()
@@ -155,6 +157,7 @@ class RibbonBar(QWidget):
         self._build_layout_tab()
         self._build_story_tab()
         self._build_review_tab()
+        self._build_aesthetics_tab()
         self._build_view_tab()
 
     def _build_header_controls(self) -> None:
@@ -1003,6 +1006,88 @@ class RibbonBar(QWidget):
         layout.addStretch()
         self.tab_widget.addTab(tab, "Review")
 
+    def _build_aesthetics_tab(self) -> None:
+        tab = QWidget()
+        layout = QHBoxLayout(tab)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(6)
+
+        # 1. Studio Theme Group
+        theme_group = ModernRibbonGroup("Studio Theme")
+        v_th = QVBoxLayout()
+        v_th.setSpacing(3)
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItem("Deep Midnight Studio")
+        self.theme_combo.addItem("Classic Warm Scholarly")
+        self.theme_combo.addItem("Modern Fluent Light")
+        self.theme_combo.currentTextChanged.connect(self.themeChanged.emit)
+        v_th.addWidget(self.theme_combo)
+        theme_group.add_layout(v_th)
+        layout.addWidget(theme_group)
+        layout.addWidget(create_ribbon_separator())
+
+        # 2. Typewriter Acoustics Group
+        typewriter_group = ModernRibbonGroup("Typewriter Acoustics")
+        v_tw = QVBoxLayout()
+        v_tw.setSpacing(3)
+
+        self.typewriter_combo = QComboBox()
+        for tp in TypewriterSoundPreset:
+            self.typewriter_combo.addItem(tp.value, tp)
+        self.typewriter_combo.currentIndexChanged.connect(
+            lambda: self.typewriterSoundChanged.emit(self.typewriter_combo.currentData())
+        )
+        v_tw.addWidget(self.typewriter_combo)
+
+        h_tw_vol = QHBoxLayout()
+        lbl_tw = QLabel("Vol:")
+        lbl_tw.setStyleSheet("color: #7aa2f7; font-size: 10px; font-weight: 600;")
+        h_tw_vol.addWidget(lbl_tw)
+        self.slider_typewriter_vol = QSlider(Qt.Orientation.Horizontal)
+        self.slider_typewriter_vol.setRange(0, 100)
+        self.slider_typewriter_vol.setValue(50)
+        self.slider_typewriter_vol.setFixedWidth(80)
+        self.slider_typewriter_vol.setToolTip("Adjust typewriter keystroke volume")
+        self.slider_typewriter_vol.valueChanged.connect(self.typewriterVolumeChanged.emit)
+        h_tw_vol.addWidget(self.slider_typewriter_vol)
+        v_tw.addLayout(h_tw_vol)
+
+        typewriter_group.add_layout(v_tw)
+        layout.addWidget(typewriter_group)
+        layout.addWidget(create_ribbon_separator())
+
+        # 3. Ambient Soundscapes Group
+        ambient_group = ModernRibbonGroup("Ambient Soundscapes")
+        v_amb = QVBoxLayout()
+        v_amb.setSpacing(3)
+
+        self.ambient_combo = QComboBox()
+        for ap in AmbientSoundPreset:
+            self.ambient_combo.addItem(ap.value, ap)
+        self.ambient_combo.currentIndexChanged.connect(
+            lambda: self.ambientSoundChanged.emit(self.ambient_combo.currentData())
+        )
+        v_amb.addWidget(self.ambient_combo)
+
+        h_amb_vol = QHBoxLayout()
+        lbl_amb = QLabel("Vol:")
+        lbl_amb.setStyleSheet("color: #7aa2f7; font-size: 10px; font-weight: 600;")
+        h_amb_vol.addWidget(lbl_amb)
+        self.slider_ambient_vol = QSlider(Qt.Orientation.Horizontal)
+        self.slider_ambient_vol.setRange(0, 100)
+        self.slider_ambient_vol.setValue(35)
+        self.slider_ambient_vol.setFixedWidth(80)
+        self.slider_ambient_vol.setToolTip("Adjust continuous ambient soundscape volume")
+        self.slider_ambient_vol.valueChanged.connect(self.ambientVolumeChanged.emit)
+        h_amb_vol.addWidget(self.slider_ambient_vol)
+        v_amb.addLayout(h_amb_vol)
+
+        ambient_group.add_layout(v_amb)
+        layout.addWidget(ambient_group)
+
+        layout.addStretch()
+        self.tab_widget.addTab(tab, "Aesthetics")
+
     def _build_view_tab(self) -> None:
         tab = QWidget()
         layout = QHBoxLayout(tab)
@@ -1038,43 +1123,10 @@ class RibbonBar(QWidget):
 
         disp_group.add_layout(v_d)
         layout.addWidget(disp_group)
-        layout.addWidget(create_ribbon_separator())
-
-        theme_group = ModernRibbonGroup("Theme")
-        self.theme_combo = QComboBox()
-        self.theme_combo.addItem("Deep Midnight Studio")
-        self.theme_combo.addItem("Classic Warm Scholarly")
-        self.theme_combo.addItem("Modern Fluent Light")
-        self.theme_combo.currentTextChanged.connect(self.themeChanged.emit)
-        theme_group.add_widget(self.theme_combo)
-        layout.addWidget(theme_group)
-        layout.addWidget(create_ribbon_separator())
-
-        # Sensory Acoustics Group
-        sound_group = ModernRibbonGroup("Sensory & Acoustics")
-        v_s = QVBoxLayout()
-        v_s.setSpacing(3)
-
-        h_s1 = QHBoxLayout()
-        h_s1.addWidget(QLabel("Typewriter:"))
-        self.typewriter_combo = QComboBox()
-        for tp in TypewriterSoundPreset:
-            self.typewriter_combo.addItem(tp.value, tp)
-        self.typewriter_combo.currentIndexChanged.connect(lambda: self.typewriterSoundChanged.emit(self.typewriter_combo.currentData()))
-        h_s1.addWidget(self.typewriter_combo)
-        v_s.addLayout(h_s1)
-
-        h_s2 = QHBoxLayout()
-        h_s2.addWidget(QLabel("Ambient:"))
-        self.ambient_combo = QComboBox()
-        for ap in AmbientSoundPreset:
-            self.ambient_combo.addItem(ap.value, ap)
-        self.ambient_combo.currentIndexChanged.connect(lambda: self.ambientSoundChanged.emit(self.ambient_combo.currentData()))
-        h_s2.addWidget(self.ambient_combo)
-        v_s.addLayout(h_s2)
-
-        sound_group.add_layout(v_s)
-        layout.addWidget(sound_group)
 
         layout.addStretch()
         self.tab_widget.addTab(tab, "View")
+
+
+# Alias for backwards compatibility / semantic naming
+ModernRibbon = RibbonBar

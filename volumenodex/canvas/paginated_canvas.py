@@ -608,7 +608,7 @@ class PaginatedCanvas(QAbstractScrollArea):
     # --- Rich Formatting Helpers for Ribbon ---
     def set_font_family(self, family: str) -> None:
         fmt = QTextCharFormat()
-        fmt.setFontFamily(family)
+        fmt.setFontFamilies([family])
         self._cursor.mergeCharFormat(fmt)
         self.viewport().update()
 
@@ -781,7 +781,7 @@ class PaginatedCanvas(QAbstractScrollArea):
         """Applies a custom user-defined style dictionary to current cursor or selection."""
         cf = QTextCharFormat()
         if "font_family" in style_dict and style_dict["font_family"]:
-            cf.setFontFamily(style_dict["font_family"])
+            cf.setFontFamilies([style_dict["font_family"]])
         if "font_size" in style_dict and style_dict["font_size"]:
             cf.setFontPointSize(style_dict["font_size"])
         if "bold" in style_dict:

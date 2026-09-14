@@ -190,7 +190,7 @@ class IOManager:
                         if run.underline:
                             char_fmt.setFontUnderline(True)
                         if run.font.name:
-                            char_fmt.setFontFamily(run.font.name)
+                            char_fmt.setFontFamilies([run.font.name])
                         if run.font.size:
                             char_fmt.setFontPointSize(run.font.size.pt)
 

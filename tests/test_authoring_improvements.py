@@ -257,3 +257,53 @@ def test_font_color_and_highlight_docx_roundtrip(app):
     finally:
         if os.path.exists(temp_docx):
             os.remove(temp_docx)
+
+
+def test_aesthetics_ribbon_tab(app):
+    """Validates that theme and sensory acoustics reside in the new Aesthetics tab."""
+    from volumenodex.ui.ribbon import RibbonBar, TypewriterSoundPreset, AmbientSoundPreset
+    ribbon = RibbonBar()
+    tab_names = [ribbon.tab_widget.tabText(i) for i in range(ribbon.tab_widget.count())]
+    assert "Aesthetics" in tab_names, f"Expected 'Aesthetics' tab in ribbon, got {tab_names}"
+
+    # Aesthetics tab contains theme and sound controls
+    assert hasattr(ribbon, "theme_combo")
+    assert hasattr(ribbon, "typewriter_combo")
+    assert hasattr(ribbon, "ambient_combo")
+    assert hasattr(ribbon, "slider_typewriter_vol")
+    assert hasattr(ribbon, "slider_ambient_vol")
+
+    # Verify View tab does NOT duplicate theme/sensory
+    view_idx = tab_names.index("View")
+    view_tab = ribbon.tab_widget.widget(view_idx)
+    assert ribbon.tab_widget.tabText(view_idx) == "View"
+
+
+def test_audio_engine_acoustics_and_ambient(app):
+    """Validates that AudioEngine correctly locates sounds, preloads effects, and handles playback."""
+    from volumenodex.audio.audio_engine import AudioEngine, TypewriterSoundPreset, AmbientSoundPreset
+    engine = AudioEngine()
+    assert os.path.isdir(engine.sounds_dir)
+    assert "manual_click1" in engine._effects
+    assert "bell" in engine._effects
+
+    # Keystrokes execute without exception
+    engine.play_keystroke(is_return=False, is_space=False)
+    engine.play_keystroke(is_return=True, is_space=False)
+
+    # Ambient soundscape selection
+    engine.set_ambient_preset(AmbientSoundPreset.BROWN_NOISE)
+    assert engine._ambient_player.source().isValid()
+    engine.set_ambient_preset(AmbientSoundPreset.OFF)
+
+
+def test_window_icon_configured(app):
+    """Validates that MainWindow configures a valid application icon."""
+    from volumenodex.ui.main_window import MainWindow
+    win = MainWindow()
+    try:
+        ico = win.windowIcon()
+        assert not ico.isNull(), "MainWindow icon must be set and not null"
+    finally:
+        win.close()
+

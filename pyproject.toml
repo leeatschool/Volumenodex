@@ -30,6 +30,9 @@ dependencies = [
 [project.scripts]
 volumenodex = "main:main"
 
+[project.gui-scripts]
+volumenodex = "main:main"
+
 [tool.setuptools]
 packages = [
     "volumenodex",
