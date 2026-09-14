@@ -300,6 +300,28 @@ class ThemeManager:
             color: {c.text_primary};
             outline: none;
         }}
+        /* Ribbon Bar & Tab Navigation Styling */
+        RibbonBar {{
+            background-color: {c.ribbon_tab_bg};
+        }}
+        RibbonBar QTabWidget {{
+            background-color: {c.ribbon_tab_bg};
+        }}
+        RibbonBar QTabWidget::pane {{
+            background-color: {c.ribbon_tab_active};
+            border-top: 1px solid {c.border};
+            border-bottom: 1px solid {c.border};
+        }}
+        RibbonBar QScrollArea,
+        RibbonBar QScrollArea > QWidget,
+        RibbonBar QScrollArea > QWidget > QWidget {{
+            background-color: {c.ribbon_tab_active};
+            border: none;
+        }}
+        ModernRibbonGroup,
+        ModernRibbonGroup > QWidget {{
+            background-color: transparent;
+        }}
         QTabWidget::pane {{
             border: none;
             background: transparent;

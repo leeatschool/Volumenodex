@@ -159,8 +159,10 @@ class RibbonBar(QWidget):
         sa.setFrameShape(QFrame.Shape.NoFrame)
         sa.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        sa.viewport().setAutoFillBackground(False)
+        content.setAutoFillBackground(False)
         sa.setStyleSheet("""
-            QScrollArea {
+            QScrollArea, QScrollArea > QWidget, QScrollArea > QWidget > QWidget {
                 background: transparent;
                 border: none;
             }
