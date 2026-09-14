@@ -60,10 +60,13 @@ def test_reference_entry_model():
     assert score_none == 0
 
 
-def test_reference_manager_clean_initial_state():
+def test_reference_manager_bundled_initial_state():
     rm = ReferenceManager()
-    # Bundled knowledge starts completely clean
-    assert rm.total_count == 0
+    # Bundled knowledge contains the curated encyclopedic reference library
+    assert rm.total_count >= 200
+    assert rm.custom_count == 0
+    categories = rm.get_categories()
+    assert len(categories) >= 5
 
 
 def test_reference_manager_empty_and_custom_entries():
