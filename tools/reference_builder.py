@@ -22,10 +22,12 @@ from PySide6.QtWidgets import (
     QApplication, QDialog, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QTextEdit, QComboBox, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
-    QFileDialog, QScrollArea, QFrame, QSplitter
+    QFileDialog, QScrollArea, QFrame, QSplitter, QProgressBar,
+    QSpinBox, QRadioButton, QButtonGroup
 )
 
 from volumenodex.reference.reference_model import ReferenceEntry, ReferenceCategory
+from volumenodex.reference.pdf_ingestor import PDFArticleifier, incorporate_entries
 
 
 DEFAULT_BUNDLED_PATH = REPO_ROOT / "volumenodex" / "reference" / "bundled_knowledge.json"
@@ -283,8 +285,409 @@ class ReferenceEntryEditorDialog(QDialog):
             "is_custom": False,
         }
 
-        self.entrySaved.emit(res_dict)
-        self.accept()
+class PDFIngestionDialog(QDialog):
+    """Interactive GUI dialog to auto-ingest a PDF document into structured reference entries."""
+
+    entriesIngested = Signal(list)  # Emits list of incorporated dicts
+
+    def __init__(self, target_json_path: Optional[Path] = None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Auto-Ingest PDF into Writers Reference")
+        self.resize(980, 720)
+        self.setMinimumSize(740, 560)
+        self.target_path = Path(target_json_path) if target_json_path else DEFAULT_BUNDLED_PATH
+        self._extracted_entries: List[ReferenceEntry] = []
+        self._filtered_indices: List[int] = []
+
+        if parent and hasattr(parent, "logo_path") and parent.logo_path:
+            self.setWindowIcon(QIcon(parent.logo_path))
+
+        self._init_styles()
+        self._init_ui()
+
+    def _init_styles(self) -> None:
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #12131a;
+                color: #e1e4f2;
+                font-family: 'Segoe UI', sans-serif;
+            }
+            QLabel {
+                color: #a2a7c4;
+                font-weight: 600;
+                font-size: 11px;
+            }
+            QLineEdit, QComboBox, QSpinBox {
+                background-color: #1a1b24;
+                color: #ffffff;
+                border: 1px solid #2d2f40;
+                border-radius: 5px;
+                padding: 6px 10px;
+                font-size: 12px;
+            }
+            QLineEdit:focus, QComboBox:focus, QSpinBox:focus {
+                border-color: #7aa2f7;
+            }
+            QTableWidget {
+                background-color: #161720;
+                border: 1px solid #2a2c3d;
+                border-radius: 6px;
+                gridline-color: #1f212e;
+                font-size: 12px;
+                color: #e1e4f2;
+            }
+            QHeaderView::section {
+                background-color: #1a1b26;
+                color: #7aa2f7;
+                padding: 5px;
+                font-weight: 700;
+                border: 1px solid #262838;
+            }
+            QPushButton {
+                background-color: #1f212d;
+                color: #e1e4f2;
+                border: 1px solid #2d2f40;
+                border-radius: 5px;
+                padding: 6px 14px;
+                font-weight: 600;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #2b2d3d;
+                border-color: #7aa2f7;
+                color: #ffffff;
+            }
+            QPushButton#primaryBtn {
+                background-color: #7aa2f7;
+                color: #101116;
+                border: 1px solid #7aa2f7;
+                font-weight: 700;
+            }
+            QPushButton#primaryBtn:hover {
+                background-color: #89b4fa;
+            }
+            QProgressBar {
+                border: 1px solid #2d2f40;
+                border-radius: 4px;
+                text-align: center;
+                background-color: #161720;
+                color: #ffffff;
+                font-size: 11px;
+                font-weight: bold;
+                height: 18px;
+            }
+            QProgressBar::chunk {
+                background-color: #7aa2f7;
+                border-radius: 3px;
+            }
+            QRadioButton {
+                color: #e1e4f2;
+                font-size: 12px;
+                font-weight: 500;
+            }
+        """)
+
+    def _init_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
+
+        # Header Title
+        h_title = QHBoxLayout()
+        v_meta = QVBoxLayout()
+        v_meta.setSpacing(2)
+        lbl_head = QLabel("AUTOMATED PDF ARTICLEIFIER")
+        lbl_head.setStyleSheet("font-size: 16px; font-weight: 800; letter-spacing: 1px; color: #7aa2f7;")
+        v_meta.addWidget(lbl_head)
+        lbl_sub = QLabel("Convert PDF manuals, treatises, and books into structured offline knowledge articles with local heuristic NLP.")
+        lbl_sub.setStyleSheet("font-size: 11px; color: #8c91b0;")
+        v_meta.addWidget(lbl_sub)
+        h_title.addLayout(v_meta)
+        h_title.addStretch()
+        layout.addLayout(h_title)
+
+        # PDF File Picker Row
+        h_file = QHBoxLayout()
+        h_file.setSpacing(8)
+        lbl_f = QLabel("PDF File:")
+        lbl_f.setStyleSheet("min-width: 60px;")
+        h_file.addWidget(lbl_f)
+
+        self.edit_pdf_path = QLineEdit()
+        self.edit_pdf_path.setPlaceholderText("Select a PDF document to articleafy...")
+        self.edit_pdf_path.textChanged.connect(self._on_pdf_path_changed)
+        h_file.addWidget(self.edit_pdf_path, stretch=1)
+
+        btn_browse = QPushButton("📁 Browse PDF...")
+        btn_browse.clicked.connect(self._browse_pdf)
+        h_file.addWidget(btn_browse)
+        layout.addLayout(h_file)
+
+        # Document Info Banner
+        self.lbl_doc_info = QLabel("No PDF selected.")
+        self.lbl_doc_info.setStyleSheet("background-color: #181924; border: 1px dashed #2d2f40; border-radius: 5px; padding: 6px 12px; font-size: 11px; color: #7aa2f7;")
+        layout.addWidget(self.lbl_doc_info)
+
+        # Extraction Settings Bar
+        h_settings = QHBoxLayout()
+        h_settings.setSpacing(10)
+
+        # Mode
+        h_settings.addWidget(QLabel("Mode:"))
+        self.combo_mode = QComboBox()
+        self.combo_mode.addItem("Auto-Detect Structure (Recommended)", "auto")
+        self.combo_mode.addItem("Table of Contents / Bookmarks", "toc")
+        self.combo_mode.addItem("Visual Headings & Chapters", "headings")
+        self.combo_mode.addItem("Lexicon / Glossary Entries", "lexicon")
+        h_settings.addWidget(self.combo_mode)
+
+        # Category
+        h_settings.addWidget(QLabel("Category:"))
+        self.combo_category = QComboBox()
+        self.combo_category.addItem("Auto-Classify (AI Heuristics)", None)
+        for cat in ReferenceCategory.ALL_CATEGORIES:
+            self.combo_category.addItem(cat, cat)
+        h_settings.addWidget(self.combo_category)
+
+        # Min words
+        h_settings.addWidget(QLabel("Min Words:"))
+        self.spin_min_words = QSpinBox()
+        self.spin_min_words.setRange(15, 1000)
+        self.spin_min_words.setValue(40)
+        h_settings.addWidget(self.spin_min_words)
+
+        h_settings.addStretch()
+
+        self.btn_extract = QPushButton("🚀 Parse & Extract Articles")
+        self.btn_extract.setObjectName("primaryBtn")
+        self.btn_extract.clicked.connect(self._start_extraction)
+        h_settings.addWidget(self.btn_extract)
+        layout.addLayout(h_settings)
+
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar)
+
+        # Status Label
+        self.lbl_status = QLabel("Ready to process.")
+        self.lbl_status.setStyleSheet("font-size: 11px; color: #8c91b0;")
+        layout.addWidget(self.lbl_status)
+
+        # Preview Section Header
+        h_prev_head = QHBoxLayout()
+        h_prev_head.addWidget(QLabel("EXTRACTED ARTICLES PREVIEW (Double-click to edit prior to import):"))
+        h_prev_head.addStretch()
+
+        self.edit_filter = QLineEdit()
+        self.edit_filter.setPlaceholderText("🔍 Filter preview...")
+        self.edit_filter.setMaximumWidth(220)
+        self.edit_filter.textChanged.connect(self._render_preview_table)
+        h_prev_head.addWidget(self.edit_filter)
+        layout.addLayout(h_prev_head)
+
+        # Extracted Articles Preview Table
+        self.table_preview = QTableWidget(0, 5)
+        self.table_preview.setHorizontalHeaderLabels(["Title", "Category", "Tags", "Facts", "Words"])
+        self.table_preview.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        self.table_preview.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.table_preview.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.table_preview.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.table_preview.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.table_preview.setColumnWidth(0, 320)
+        self.table_preview.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table_preview.doubleClicked.connect(self._edit_preview_entry)
+        layout.addWidget(self.table_preview, stretch=1)
+
+        # Destination & Incorporation Row
+        h_actions = QHBoxLayout()
+        h_actions.setSpacing(12)
+
+        self.lbl_preview_count = QLabel("0 Articles Extracted")
+        self.lbl_preview_count.setStyleSheet("font-weight: 700; color: #7aa2f7;")
+        h_actions.addWidget(self.lbl_preview_count)
+
+        btn_edit_row = QPushButton("✏️ Edit Selected")
+        btn_edit_row.clicked.connect(self._edit_preview_entry)
+        h_actions.addWidget(btn_edit_row)
+
+        btn_remove = QPushButton("🗑️ Discard Selected")
+        btn_remove.clicked.connect(self._remove_preview_entry)
+        h_actions.addWidget(btn_remove)
+
+        h_actions.addStretch()
+
+        self.radio_current = QRadioButton(f"Incorporate into {self.target_path.name}")
+        self.radio_current.setChecked(True)
+        h_actions.addWidget(self.radio_current)
+
+        self.radio_export = QRadioButton("Export to new JSON...")
+        h_actions.addWidget(self.radio_export)
+
+        self.btn_commit = QPushButton("📥 Import All into Knowledge Base")
+        self.btn_commit.setObjectName("primaryBtn")
+        self.btn_commit.setEnabled(False)
+        self.btn_commit.clicked.connect(self._commit_entries)
+        h_actions.addWidget(self.btn_commit)
+
+        layout.addLayout(h_actions)
+
+    def _browse_pdf(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select PDF Document", "", "PDF Documents (*.pdf)"
+        )
+        if path:
+            self.edit_pdf_path.setText(path)
+
+    def _on_pdf_path_changed(self, text: str) -> None:
+        pdf_path = text.strip()
+        if not pdf_path or not os.path.exists(pdf_path):
+            self.lbl_doc_info.setText("Selected file does not exist.")
+            return
+
+        try:
+            ingestor = PDFArticleifier(pdf_path)
+            info = ingestor.inspect_structure()
+            toc_text = f"Found {info['toc_entry_count']} Bookmarks (TOC Mode Recommended)" if info["has_toc"] else "No Bookmarks found (Visual Headings Recommended)"
+            self.lbl_doc_info.setText(
+                f"📄 {info['title']} | Pages: {info['page_count']} | {toc_text}"
+            )
+            # Auto-adjust combo box
+            if info["has_toc"]:
+                self.combo_mode.setCurrentIndex(0)
+            else:
+                self.combo_mode.setCurrentIndex(2)
+        except Exception as e:
+            self.lbl_doc_info.setText(f"Error inspecting PDF: {e}")
+
+    def _start_extraction(self) -> None:
+        pdf_path = self.edit_pdf_path.text().strip()
+        if not pdf_path or not os.path.exists(pdf_path):
+            QMessageBox.warning(self, "Invalid Path", "Please select a valid PDF file first.")
+            return
+
+        self.btn_extract.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        self.lbl_status.setText("Beginning local PDF analysis...")
+
+        mode = self.combo_mode.currentData()
+        category = self.combo_category.currentData()
+        min_words = self.spin_min_words.value()
+
+        def progress_cb(curr, total, msg):
+            pct = int((curr / max(1, total)) * 100)
+            self.progress_bar.setValue(pct)
+            self.lbl_status.setText(f"[{pct}%] {msg}")
+            QApplication.processEvents()
+
+        try:
+            ingestor = PDFArticleifier(pdf_path)
+            entries = ingestor.process(
+                mode=mode,
+                target_category=category,
+                min_words_per_article=min_words,
+                progress_callback=progress_cb
+            )
+            self._extracted_entries = entries
+            self.progress_bar.setValue(100)
+            self.lbl_status.setText(f"✓ Extraction complete! Processed {len(entries)} structured articles.")
+            self.btn_commit.setEnabled(len(entries) > 0)
+            self._render_preview_table()
+        except Exception as e:
+            QMessageBox.critical(self, "Extraction Error", f"Failed to extract articles from PDF:\n{e}")
+            self.lbl_status.setText(f"Error: {e}")
+        finally:
+            self.btn_extract.setEnabled(True)
+
+    def _render_preview_table(self) -> None:
+        q = self.edit_filter.text().strip().lower()
+        self.table_preview.setRowCount(0)
+        self._filtered_indices = []
+
+        for idx, entry in enumerate(self._extracted_entries):
+            title = entry.title
+            cat = entry.category
+            tags = ", ".join(entry.tags)
+            facts_count = f"{len(entry.quick_facts)} facts"
+            word_count = f"{len(entry.content.split())} w"
+
+            if q and (q not in title.lower() and q not in cat.lower() and q not in tags.lower()):
+                continue
+
+            r = self.table_preview.rowCount()
+            self.table_preview.insertRow(r)
+            self._filtered_indices.append(idx)
+
+            item_title = QTableWidgetItem(title)
+            item_title.setData(Qt.ItemDataRole.UserRole, idx)
+            item_cat = QTableWidgetItem(cat)
+            item_tags = QTableWidgetItem(tags)
+            item_facts = QTableWidgetItem(facts_count)
+            item_words = QTableWidgetItem(word_count)
+
+            self.table_preview.setItem(r, 0, item_title)
+            self.table_preview.setItem(r, 1, item_cat)
+            self.table_preview.setItem(r, 2, item_tags)
+            self.table_preview.setItem(r, 3, item_facts)
+            self.table_preview.setItem(r, 4, item_words)
+
+        self.lbl_preview_count.setText(f"Extracted: {len(self._extracted_entries)} Articles ({len(self._filtered_indices)} shown)")
+
+    def _edit_preview_entry(self) -> None:
+        curr = self.table_preview.currentRow()
+        if curr < 0 or curr >= len(self._filtered_indices):
+            return
+        real_idx = self._filtered_indices[curr]
+        entry = self._extracted_entries[real_idx]
+
+        dlg = ReferenceEntryEditorDialog(entry_dict=entry.to_dict(), parent=self)
+        dlg.entrySaved.connect(lambda updated_dict, i=real_idx: self._on_preview_entry_saved(i, updated_dict))
+        dlg.exec()
+
+    def _on_preview_entry_saved(self, idx: int, updated_dict: dict) -> None:
+        if 0 <= idx < len(self._extracted_entries):
+            self._extracted_entries[idx] = ReferenceEntry.from_dict(updated_dict)
+            self._render_preview_table()
+
+    def _remove_preview_entry(self) -> None:
+        curr = self.table_preview.currentRow()
+        if curr < 0 or curr >= len(self._filtered_indices):
+            return
+        real_idx = self._filtered_indices[curr]
+        removed_title = self._extracted_entries[real_idx].title
+        self._extracted_entries.pop(real_idx)
+        self._render_preview_table()
+        self.lbl_status.setText(f"Removed '{removed_title}' from batch.")
+
+    def _commit_entries(self) -> None:
+        if not self._extracted_entries:
+            return
+
+        target_file = self.target_path
+        if self.radio_export.isChecked():
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Export Extracted Articles", "extracted_reference_topics.json", "JSON Files (*.json)"
+            )
+            if not path:
+                return
+            target_file = Path(path)
+
+        try:
+            added, updated, total = incorporate_entries(self._extracted_entries, target_file, overwrite=True)
+            QMessageBox.information(
+                self, "Articles Incorporated",
+                f"Successfully incorporated {len(self._extracted_entries)} articles!\n\n"
+                f"• Added: {added} new topics\n"
+                f"• Updated: {updated} existing topics\n"
+                f"• Total topics in {target_file.name}: {total}"
+            )
+            raw_dicts = [e.to_dict() for e in self._extracted_entries]
+            self.entriesIngested.emit(raw_dicts)
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(self, "Incorporation Error", f"Failed to incorporate articles:\n{e}")
 
 
 class StandaloneReferenceBuilderApp(QWidget):
@@ -418,10 +821,13 @@ class StandaloneReferenceBuilderApp(QWidget):
         v_title.addWidget(self.lbl_target)
         h_head.addLayout(v_title)
 
-        h_head.addStretch()
+        btn_pdf = QPushButton("⚡ Auto-Ingest PDF...")
+        btn_pdf.setObjectName("primaryBtn")
+        btn_pdf.setToolTip("Automatically parse, split, tag, and incorporate PDF books and manuals")
+        btn_pdf.clicked.connect(self._open_pdf_ingestor)
+        h_head.addWidget(btn_pdf)
 
         btn_new = QPushButton("➕ Add New Topic")
-        btn_new.setObjectName("primaryBtn")
         btn_new.clicked.connect(self._add_topic)
         h_head.addWidget(btn_new)
 
@@ -534,6 +940,15 @@ class StandaloneReferenceBuilderApp(QWidget):
             self._render_table()
             self.lbl_count.setText(f"✓ Saved '{topic_dict.get('title')}'! Total: {len(self.topics)} Topics")
 
+    def _open_pdf_ingestor(self) -> None:
+        dlg = PDFIngestionDialog(target_json_path=self.target_path, parent=self)
+        dlg.entriesIngested.connect(self._on_pdf_entries_ingested)
+        dlg.exec()
+
+    def _on_pdf_entries_ingested(self, new_entries: list) -> None:
+        self._load_topics()
+        self.lbl_count.setText(f"✓ Successfully incorporated {len(new_entries)} articles from PDF! Total: {len(self.topics)} Topics")
+
     def _edit_topic(self) -> None:
         curr = self.table.currentRow()
         if curr < 0:
@@ -605,9 +1020,32 @@ def main():
     parser.add_argument("--list", action="store_true", help="List all topics currently in the database")
     parser.add_argument("--add", action="store_true", help="Interactively add a topic via CLI prompts")
     parser.add_argument("--import-file", type=str, help="Import topics from a JSON file into the reference")
+    parser.add_argument("--ingest-pdf", type=str, help="Auto-ingest a PDF file directly into the reference library")
+    parser.add_argument("--pdf-mode", choices=["auto", "toc", "headings", "lexicon"], default="auto", help="PDF parsing strategy (default: auto)")
+    parser.add_argument("--pdf-category", choices=ReferenceCategory.ALL_CATEGORIES, default=None, help="Override category classification")
+    parser.add_argument("--min-words", type=int, default=40, help="Minimum word count per article")
 
     args = parser.parse_args()
     target_path = Path(args.file)
+
+    if args.ingest_pdf:
+        pdf_path = Path(args.ingest_pdf)
+        if not pdf_path.exists():
+            print(f"Error: PDF file {pdf_path} not found.")
+            return
+        print(f"[*] Analyzing and ingesting PDF: {pdf_path}")
+        ingestor = PDFArticleifier(str(pdf_path))
+        info = ingestor.inspect_structure()
+        print(f"    Document: {info['title']} | Pages: {info['page_count']} | Bookmarks: {info['toc_entry_count']}")
+        entries = ingestor.process(
+            mode=args.pdf_mode,
+            target_category=args.pdf_category,
+            min_words_per_article=args.min_words,
+        )
+        print(f"[+] Extracted {len(entries)} structured articles.")
+        added, updated, total = incorporate_entries(entries, target_path, overwrite=True)
+        print(f"[✓] Successfully incorporated into {target_path}: {added} added, {updated} updated (Total: {total}).")
+        return
 
     if args.list:
         if target_path.exists():
