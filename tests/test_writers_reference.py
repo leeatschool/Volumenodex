@@ -60,17 +60,10 @@ def test_reference_entry_model():
     assert score_none == 0
 
 
-def test_reference_manager_bundled_corpus():
+def test_reference_manager_clean_initial_state():
     rm = ReferenceManager()
-    assert rm.total_count == 82
-    # Verify search over bundled knowledge
-    results = rm.search("triage")
-    assert len(results) >= 1
-    assert any("Triage" in r.title for r in results)
-
-    # Verify category filtering
-    tactics = rm.search(category=ReferenceCategory.WEAPONS_WARFARE)
-    assert len(tactics) >= 4
+    # Bundled knowledge starts completely clean
+    assert rm.total_count == 0
 
 
 def test_reference_manager_empty_and_custom_entries():
