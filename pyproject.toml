@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "volumenodex"
-version = "0.0.1a1"
+version = "0.0.2a1"
 description = "Volumenodex: A native standalone Windows word processing studio with luxury print fidelity and deep narrative tools."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -42,6 +42,7 @@ packages = [
     "volumenodex.core",
     "volumenodex.corkboard",
     "volumenodex.pet",
+    "volumenodex.reference",
     "volumenodex.review",
     "volumenodex.story",
     "volumenodex.ui"
@@ -50,3 +51,5 @@ py-modules = ["main"]
 
 [tool.setuptools.package-data]
 "*" = ["assets/**/*"]
+"volumenodex" = ["resources/*"]
+"volumenodex.reference" = ["bundled_knowledge.json"]

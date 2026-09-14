@@ -16,6 +16,7 @@ dist/
 *.egg
 wheels/
 *.spec
+!Volumenodex.spec
 
 # Logs & Runtime
 *.log
