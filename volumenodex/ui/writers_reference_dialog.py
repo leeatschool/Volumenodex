@@ -35,6 +35,8 @@ class WritersReferenceDialog(QDialog):
 
         self.manager = manager or ReferenceManager()
         self._custom_logo_path = self._discover_logo_path()
+        if self._custom_logo_path and os.path.exists(self._custom_logo_path):
+            self.setWindowIcon(QIcon(self._custom_logo_path))
         self._current_entry: Optional[ReferenceEntry] = None
 
         self._init_styles()
@@ -43,12 +45,16 @@ class WritersReferenceDialog(QDialog):
         self._refresh_results()
 
     def _discover_logo_path(self) -> Optional[str]:
-        """Looks for a user-provided logo in standard locations."""
+        """Looks for the Writers Reference logo in standard locations."""
         candidates = [
             os.path.join(os.path.dirname(__file__), "..", "resources", "writers_reference_logo.png"),
+            os.path.join(os.path.dirname(__file__), "..", "..", "assets", "writers_reference_logo.png"),
+            os.path.join(os.path.dirname(__file__), "..", "..", "assets", "writref.png"),
+            r"C:\Users\thele\Downloads\writref.png",
+            os.path.join(str(Path.home()), "Downloads", "writref.png"),
+            os.path.join(str(Path.home()), "Downloads", "writers_reference_logo.png"),
             os.path.join(os.path.dirname(__file__), "..", "resources", "writers_reference_logo.jpg"),
             os.path.join(os.path.dirname(__file__), "..", "resources", "writers_reference_logo.jpeg"),
-            os.path.join(str(Path.home()), "Downloads", "writers_reference_logo.png"),
             os.path.join(str(Path.home()), "Downloads", "writers_reference_logo.jpg"),
             os.path.join(str(Path.home()), "Pictures", "writers_reference_logo.png"),
         ]
@@ -202,14 +208,14 @@ class WritersReferenceDialog(QDialog):
         # Logo display widget
         self.lbl_logo = QLabel()
         self._render_logo()
-        self.lbl_logo.setToolTip("Click 'Set Logo' to customize the Writers Reference emblem")
+        self.lbl_logo.setToolTip("Writers Reference")
         h_header.addWidget(self.lbl_logo)
 
         # Title & Subtitle block
         v_title = QVBoxLayout()
         v_title.setSpacing(2)
         lbl_main_title = QLabel("WRITERS REFERENCE")
-        lbl_main_title.setStyleSheet("font-size: 17px; font-weight: 800; letter-spacing: 1px; color: #7aa2f7;")
+        lbl_main_title.setStyleSheet("font-size: 18px; font-weight: 800; letter-spacing: 1.5px; color: #7aa2f7;")
         v_title.addWidget(lbl_main_title)
 
         self.lbl_subtitle = QLabel(f"Condensed Offline Knowledge Compendium • {self.manager.total_count} Verified Topics")
@@ -218,12 +224,6 @@ class WritersReferenceDialog(QDialog):
         h_header.addLayout(v_title)
 
         h_header.addStretch()
-
-        # Top Action Buttons
-        btn_logo = QPushButton("🖼️ Set Logo...")
-        btn_logo.setToolTip("Select a custom image file for the Writers Reference emblem")
-        btn_logo.clicked.connect(self._choose_custom_logo)
-        h_header.addWidget(btn_logo)
 
         root_layout.addLayout(h_header)
 
@@ -346,11 +346,37 @@ class WritersReferenceDialog(QDialog):
         root_layout.addWidget(splitter, stretch=1)
 
     def _render_logo(self) -> None:
-        """Renders the user logo if provided, or generates an elegant vector seal."""
+        """Renders the Writers Reference logo emblem."""
+        target_size = 64
         if self._custom_logo_path and os.path.exists(self._custom_logo_path):
-            pix = QPixmap(self._custom_logo_path)
-            if not pix.isNull():
-                self.lbl_logo.setPixmap(pix.scaled(44, 44, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            src = QPixmap(self._custom_logo_path)
+            if not src.isNull():
+                rounded = QPixmap(target_size, target_size)
+                rounded.fill(Qt.GlobalColor.transparent)
+
+                painter = QPainter(rounded)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+
+                path = QPainterPath()
+                path.addRoundedRect(QRectF(0.5, 0.5, target_size - 1, target_size - 1), 10, 10)
+                painter.setClipPath(path)
+
+                scaled_src = src.scaled(
+                    target_size, target_size,
+                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                painter.drawPixmap(0, 0, scaled_src)
+
+                # Elegant subtle border matching theme
+                painter.setClipping(False)
+                painter.setPen(QPen(QColor(122, 162, 247, 130), 1.5))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRoundedRect(QRectF(0.5, 0.5, target_size - 1, target_size - 1), 10, 10)
+                painter.end()
+
+                self.lbl_logo.setPixmap(rounded)
                 return
 
         # Vector Emblem Fallback: An open leather tome with a golden quill

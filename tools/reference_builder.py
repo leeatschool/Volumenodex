@@ -16,8 +16,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QFont, QIcon
+from PySide6.QtCore import Qt, Signal, QRectF
+from PySide6.QtGui import QColor, QFont, QIcon, QPixmap, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QApplication, QDialog, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QTextEdit, QComboBox, QPushButton,
@@ -42,6 +42,8 @@ class ReferenceEntryEditorDialog(QDialog):
         self.resize(760, 700)
         self.setMinimumSize(560, 520)
         self._existing_dict = entry_dict
+        if parent and hasattr(parent, "logo_path") and parent.logo_path:
+            self.setWindowIcon(QIcon(parent.logo_path))
 
         self.setStyleSheet("""
             QDialog {
@@ -295,10 +297,26 @@ class StandaloneReferenceBuilderApp(QWidget):
 
         self.target_path = Path(target_json_path) if target_json_path else DEFAULT_BUNDLED_PATH
         self.topics: List[dict] = []
+        self.logo_path = self._discover_logo_path()
+        if self.logo_path:
+            self.setWindowIcon(QIcon(self.logo_path))
 
         self._init_styles()
         self._init_ui()
         self._load_topics()
+
+    def _discover_logo_path(self) -> Optional[str]:
+        candidates = [
+            REPO_ROOT / "volumenodex" / "resources" / "writers_reference_logo.png",
+            REPO_ROOT / "assets" / "writers_reference_logo.png",
+            REPO_ROOT / "assets" / "writref.png",
+            Path(r"C:\Users\thele\Downloads\writref.png"),
+            Path.home() / "Downloads" / "writref.png",
+        ]
+        for c in candidates:
+            if c.exists():
+                return str(c)
+        return None
 
     def _init_styles(self) -> None:
         self.setStyleSheet("""
@@ -364,14 +382,38 @@ class StandaloneReferenceBuilderApp(QWidget):
 
         # Header Bar
         h_head = QHBoxLayout()
+        h_head.setSpacing(12)
+
+        if self.logo_path and os.path.exists(self.logo_path):
+            lbl_logo = QLabel()
+            src = QPixmap(self.logo_path)
+            if not src.isNull():
+                target_size = 48
+                rounded = QPixmap(target_size, target_size)
+                rounded.fill(Qt.GlobalColor.transparent)
+                p = QPainter(rounded)
+                p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+                clip = QPainterPath()
+                clip.addRoundedRect(QRectF(0.5, 0.5, target_size - 1, target_size - 1), 8, 8)
+                p.setClipPath(clip)
+                p.drawPixmap(0, 0, src.scaled(target_size, target_size, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation))
+                p.setClipping(False)
+                p.setPen(QPen(QColor(122, 162, 247, 130), 1.2))
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawRoundedRect(QRectF(0.5, 0.5, target_size - 1, target_size - 1), 8, 8)
+                p.end()
+                lbl_logo.setPixmap(rounded)
+                h_head.addWidget(lbl_logo)
+
         v_title = QVBoxLayout()
         v_title.setSpacing(2)
 
-        title_lbl = QLabel("📚 Writers Reference Builder & Curator")
-        title_lbl.setStyleSheet("font-size: 17px; font-weight: 800; color: #7aa2f7;")
+        title_lbl = QLabel("WRITERS REFERENCE BUILDER")
+        title_lbl.setStyleSheet("font-size: 17px; font-weight: 800; letter-spacing: 1px; color: #7aa2f7;")
         v_title.addWidget(title_lbl)
 
-        self.lbl_target = QLabel(f"Target: {self.target_path}")
+        self.lbl_target = QLabel(f"Target Library: {self.target_path.name} (Bundled Offline Knowledge)")
         self.lbl_target.setStyleSheet("font-size: 11px; color: #8c91b0;")
         v_title.addWidget(self.lbl_target)
         h_head.addLayout(v_title)

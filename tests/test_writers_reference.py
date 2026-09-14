@@ -135,6 +135,8 @@ def test_writers_reference_dialog_ui(app):
         rm = ReferenceManager(user_storage_dir=tmpdir)
         # Empty state
         dlg = WritersReferenceDialog(manager=rm)
+        assert dlg.lbl_logo.pixmap() is not None
+        assert not dlg.lbl_logo.pixmap().isNull()
         assert dlg.list_results.count() == 0
         assert "Empty" in dlg.text_browser.toHtml()
 
@@ -248,6 +250,8 @@ def test_main_window_writers_reference(app):
     assert len(after_text) > len(init_text)
     assert "WRITERS REFERENCE:" in after_text
 
+    # Clean up test entry so user's database stays clean
+    dlg.manager.delete_entry("test-entry")
     win.editor.document().setModified(False)
     dlg.close()
     win.close()
