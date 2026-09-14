@@ -23,11 +23,12 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QTextEdit, QComboBox, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
     QFileDialog, QScrollArea, QFrame, QSplitter, QProgressBar,
-    QSpinBox, QRadioButton, QButtonGroup
+    QSpinBox, QRadioButton, QButtonGroup, QCheckBox
 )
 
 from volumenodex.reference.reference_model import ReferenceEntry, ReferenceCategory
 from volumenodex.reference.pdf_ingestor import PDFArticleifier, incorporate_entries
+from volumenodex.reference.text_normalizer import TextNormalizer
 
 
 DEFAULT_BUNDLED_PATH = REPO_ROOT / "volumenodex" / "reference" / "bundled_knowledge.json"
@@ -200,6 +201,12 @@ class ReferenceEntryEditorDialog(QDialog):
 
         # Buttons
         h_btns = QHBoxLayout()
+
+        btn_clean = QPushButton("✨ Clean & Reflow Text")
+        btn_clean.setToolTip("Reflow line breaks into clean paragraphs and normalize ALL-CAPS into sentence case")
+        btn_clean.clicked.connect(self._clean_and_reflow_text)
+        h_btns.addWidget(btn_clean)
+
         h_btns.addStretch()
         btn_cancel = QPushButton("Cancel")
         btn_cancel.clicked.connect(self.reject)
@@ -243,6 +250,24 @@ class ReferenceEntryEditorDialog(QDialog):
         self.table_facts.setRowCount(0)
         for k, v in d.get("quick_facts", {}).items():
             self._add_fact_row(k, v)
+
+    def _clean_and_reflow_text(self) -> None:
+        """Cleans broken line-breaks into paragraphs, repairs typography, and normalizes case."""
+        raw_title = self.edit_title.text()
+        if raw_title:
+            self.edit_title.setText(TextNormalizer.normalize_title_case(raw_title))
+
+        raw_summary = self.edit_summary.text()
+        if raw_summary:
+            self.edit_summary.setText(TextNormalizer.clean_and_normalize(raw_summary))
+
+        raw_content = self.edit_content.toPlainText()
+        if raw_content:
+            self.edit_content.setPlainText(TextNormalizer.clean_and_normalize(raw_content))
+
+        raw_tips = self.edit_tips.toPlainText()
+        if raw_tips:
+            self.edit_tips.setPlainText(TextNormalizer.clean_and_normalize(raw_tips))
 
     def _save_entry(self) -> None:
         title = self.edit_title.text().strip()
@@ -464,6 +489,23 @@ class PDFIngestionDialog(QDialog):
         h_settings.addWidget(self.btn_extract)
         layout.addLayout(h_settings)
 
+        # Smart Normalization Controls
+        h_norm = QHBoxLayout()
+        h_norm.setSpacing(16)
+
+        self.chk_reflow = QCheckBox("Reflow line breaks into clean paragraphs")
+        self.chk_reflow.setChecked(True)
+        self.chk_reflow.setToolTip("Joins hard-wrapped OCR and column line-breaks into contiguous paragraphs, repairing split hyphens.")
+        h_norm.addWidget(self.chk_reflow)
+
+        self.chk_sentence_case = QCheckBox("Normalize ALL-CAPS into Sentence / Title Case")
+        self.chk_sentence_case.setChecked(True)
+        self.chk_sentence_case.setToolTip("Converts screaming uppercase text into natural Sentence case while preserving acronyms like FAA, NASA, DNA, and Roman numerals.")
+        h_norm.addWidget(self.chk_sentence_case)
+
+        h_norm.addStretch()
+        layout.addLayout(h_norm)
+
         # Progress bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
@@ -588,6 +630,8 @@ class PDFIngestionDialog(QDialog):
                 mode=mode,
                 target_category=category,
                 min_words_per_article=min_words,
+                reflow_paragraphs=self.chk_reflow.isChecked(),
+                normalize_case=self.chk_sentence_case.isChecked(),
                 progress_callback=progress_cb
             )
             self._extracted_entries = entries
@@ -1044,6 +1088,8 @@ def main():
             mode=args.pdf_mode,
             target_category=args.pdf_category,
             min_words_per_article=args.min_words,
+            reflow_paragraphs=True,
+            normalize_case=True,
         )
         print(f"[+] Extracted {len(entries)} structured articles.")
         added, updated, total = incorporate_entries(entries, target_path, overwrite=True)

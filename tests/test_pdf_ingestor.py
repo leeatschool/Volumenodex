@@ -219,3 +219,48 @@ def test_pdf_ingestion_dialog_ui(monkeypatch):
 
         dlg.close()
         builder.close()
+
+
+def test_pdf_articleifier_reflow_and_sentence_case():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pdf_path = os.path.join(tmpdir, "broken_caps.pdf")
+        doc = fitz.open()
+        p = doc.new_page()
+        p.insert_text((72, 72), "CHAPTER 4: SHOUTING HEADLINE FOR TESTING", fontsize=14)
+        broken_text = (
+            "THE STANDING RIGGING CONSISTS OF\n"
+            "SHROUDS, STAYS, AND BACKSTAYS\n"
+            "SUPPORTING THE MASTS IN HIGH SEAS.\n\n"
+            "ACCORDING TO FAA AND NASA EXPERTS, RECON-\n"
+            "NAISSANCE IS VITAL IN ADVERSE CONDITIONS.\n"
+            "DO YOU AGREE? YES, I AM CONVINCED OF THIS FACT.\n"
+            "TENSILE STRENGTH: 4500 LBS\n"
+            "INSPECTION INTERVAL: 30 DAYS\n"
+        )
+        p.insert_textbox(fitz.Rect(72, 100, 500, 400), broken_text, fontsize=10)
+        doc.set_toc([[1, "CHAPTER 4: SHOUTING HEADLINE FOR TESTING", 1]])
+        doc.save(pdf_path)
+        doc.close()
+
+        ingestor = PDFArticleifier(pdf_path)
+        entries = ingestor.process(mode="auto", min_words_per_article=20, reflow_paragraphs=True, normalize_case=True)
+
+        assert len(entries) == 1
+        entry = entries[0]
+
+        # Title normalized to Title Case
+        assert entry.title == "Chapter 4: Shouting Headline for Testing"
+
+        # Paragraphs reflowed without false line breaks
+        assert "standing rigging consists of shrouds, stays, and backstays supporting the masts" in entry.content.lower()
+
+        # Hyphen across lines repaired into reconnaissance
+        assert "reconnaissance" in entry.content.lower()
+
+        # Acronyms preserved in uppercase
+        assert "FAA" in entry.content
+        assert "NASA" in entry.content
+
+        # Sentence case preserved
+        assert entry.content.startswith("The standing rigging")
+        assert "I am convinced" in entry.content

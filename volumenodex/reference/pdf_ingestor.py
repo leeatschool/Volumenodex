@@ -23,6 +23,7 @@ except ImportError:
         fitz = None
 
 from volumenodex.reference.reference_model import ReferenceEntry, ReferenceCategory
+from volumenodex.reference.text_normalizer import TextNormalizer
 
 
 # Standard common English stopwords for tag extraction
@@ -166,6 +167,8 @@ class PDFArticleifier:
         target_category: Optional[str] = None,
         min_words_per_article: int = 40,
         max_words_per_article: int = 2500,
+        reflow_paragraphs: bool = True,
+        normalize_case: bool = True,
         progress_callback: Optional[Callable[[int, int, str], None]] = None
     ) -> List[ReferenceEntry]:
         """Main pipeline to parse the PDF, split into articles, auto-tag, auto-classify, and build entries.
@@ -228,6 +231,19 @@ class PDFArticleifier:
             chunks = self._chunk_text(title, text, max_words_per_article)
 
             for chunk_idx, (chunk_title, chunk_text) in enumerate(chunks):
+                # 1. Normalize Title Casing
+                if normalize_case:
+                    chunk_title = TextNormalizer.normalize_title_case(chunk_title)
+
+                # 2. Reflow line-broken paragraphs and clean typography
+                if reflow_paragraphs:
+                    chunk_text = TextNormalizer.clean_typography(chunk_text)
+                    chunk_text = TextNormalizer.reflow_paragraphs(chunk_text)
+
+                # 3. Normalize Sentence Case for screaming all-caps text
+                if normalize_case:
+                    chunk_text = TextNormalizer.normalize_sentence_case(chunk_text)
+
                 # Classify category
                 category = target_category
                 if not category or category == "Auto-Detect Category":
@@ -552,17 +568,15 @@ class PDFArticleifier:
         facts: Dict[str, str] = {}
         lines = [l.strip() for l in text.splitlines() if l.strip()]
 
-        # Pattern 1: Explicit key-value lines (e.g. "Range: 500m" or "Duration: 2 hours")
-        kv_pattern = re.compile(r'^([A-Z][A-Za-z\s]{2,20})\s*:\s*([^\n;]{3,70})$')
-        for line in lines:
-            m = kv_pattern.match(line)
-            if m:
-                k = m.group(1).strip().title()
-                v = m.group(2).strip()
-                if k not in facts and not k.startswith("Http"):
-                    facts[k] = v
-                if len(facts) >= 5:
-                    break
+        # Pattern 1: Explicit key-value lines or segments (e.g. "Range: 500m" or "Duration: 2 hours")
+        kv_pattern = re.compile(r'(?:^|\n|[\.;]\s+)([A-Z][A-Za-z\s]{2,20})\s*:\s*([^\n;]{3,70})')
+        for m in kv_pattern.finditer(text):
+            k = m.group(1).strip().title()
+            v = m.group(2).strip()
+            if k not in facts and not k.startswith(("Http", "Figure", "Table")):
+                facts[k] = v
+            if len(facts) >= 5:
+                break
 
         # Pattern 2: Numbers with units (distances, speeds, weights, temperatures)
         if len(facts) < 4:
