@@ -1,6 +1,7 @@
 """Modern Fluent Paginated Document Canvas with discrete paper sheets and print fidelity."""
 
 import os
+import re
 import math
 from typing import Optional, List, Any, Tuple
 from PySide6.QtCore import Qt, Signal, QRectF, QRect, QPointF, QPoint, QTimer, QSize, QSizeF, QUrl
@@ -8,7 +9,7 @@ from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QFont, QTextCursor, QTextDocument,
     QAbstractTextDocumentLayout, QTextCharFormat, QTextBlockFormat,
     QTextListFormat, QKeySequence, QLinearGradient, QRadialGradient,
-    QPainterPath, QClipboard, QGuiApplication, QImage, QTextImageFormat, QPixmap
+    QPainterPath, QClipboard, QGuiApplication, QImage, QTextImageFormat, QPixmap, QIcon
 )
 from PySide6.QtWidgets import (
     QAbstractScrollArea, QScrollBar, QApplication, QMenu
@@ -477,6 +478,18 @@ class PaginatedCanvas(QAbstractScrollArea):
 
         # 2. Editing & Deletion
         elif key == Qt.Key.Key_Backspace:
+            if not self._cursor.hasSelection() and self._cursor.block().textList() is not None:
+                block = self._cursor.block()
+                if not block.text().strip():
+                    lst = block.textList()
+                    lst.remove(block)
+                    bf = QTextBlockFormat()
+                    self._cursor.setBlockFormat(bf)
+                    self.keystrokeHappened.emit(False, False)
+                    self._reset_cursor_blink()
+                    self.cursorPositionChanged.emit()
+                    self.viewport().update()
+                    return
             if self._cursor.hasSelection():
                 self._cursor.removeSelectedText()
             else:
@@ -489,6 +502,18 @@ class PaginatedCanvas(QAbstractScrollArea):
                 self._cursor.deleteChar()
             self.keystrokeHappened.emit(False, False)
         elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if not is_ctrl and self._cursor.block().textList() is not None:
+                block = self._cursor.block()
+                if not block.text().strip():
+                    lst = block.textList()
+                    lst.remove(block)
+                    bf = QTextBlockFormat()
+                    self._cursor.setBlockFormat(bf)
+                    self.keystrokeHappened.emit(True, False)
+                    self._reset_cursor_blink()
+                    self.cursorPositionChanged.emit()
+                    self.viewport().update()
+                    return
             if is_ctrl:
                 # Page Break
                 bf = QTextBlockFormat()
@@ -546,8 +571,19 @@ class PaginatedCanvas(QAbstractScrollArea):
 
         # 4. Text Input
         elif event.text() and not is_ctrl:
-            self._cursor.insertText(event.text())
-            is_space = event.text() == " "
+            typed_char = event.text()
+            if typed_char == " " and self._cursor.block().textList() is not None and not self._cursor.block().text():
+                self._reset_cursor_blink()
+                self.viewport().update()
+                return
+
+            self._cursor.insertText(typed_char)
+            is_space = typed_char == " "
+
+            # Auto-numbered list check: triggered after entering a number followed by a period at start of line
+            if (typed_char == "." or is_space) and self._cursor.block().textList() is None:
+                self._check_auto_numbered_list()
+
             self.keystrokeHappened.emit(False, is_space)
         else:
             super().keyPressEvent(event)
@@ -619,6 +655,13 @@ class PaginatedCanvas(QAbstractScrollArea):
         self._cursor.mergeCharFormat(fmt)
         self.viewport().update()
 
+    def clear_highlight(self) -> None:
+        """Removes background highlight color from current selection or cursor position."""
+        fmt = QTextCharFormat()
+        fmt.setBackground(QBrush(Qt.BrushStyle.NoBrush))
+        self._cursor.mergeCharFormat(fmt)
+        self.viewport().update()
+
     def set_alignment(self, align: Qt.AlignmentFlag) -> None:
         bf = self._cursor.blockFormat()
         bf.setAlignment(align)
@@ -635,9 +678,37 @@ class PaginatedCanvas(QAbstractScrollArea):
         self._cursor.createList(QTextListFormat.Style.ListDisc)
         self.viewport().update()
 
-    def create_numbered_list(self) -> None:
-        self._cursor.createList(QTextListFormat.Style.ListDecimal)
+    def create_numbered_list(self, start: int = 1) -> None:
+        fmt = QTextListFormat()
+        fmt.setStyle(QTextListFormat.Style.ListDecimal)
+        fmt.setStart(start)
+        self._cursor.createList(fmt)
         self.viewport().update()
+
+    def _check_auto_numbered_list(self) -> None:
+        """Detects 'N.' at the start of a line and auto-triggers a numbered list starting at N."""
+        block = self._cursor.block()
+        if block.textList() is not None:
+            return
+
+        text = block.text()
+        m = re.match(r"^(\s*)(\d+)\.(\s*)$", text)
+        if m:
+            indent = len(m.group(1))
+            start_num = int(m.group(2))
+
+            self._cursor.beginEditBlock()
+            self._cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+            self._cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
+            self._cursor.removeSelectedText()
+
+            fmt = QTextListFormat()
+            fmt.setStyle(QTextListFormat.Style.ListDecimal)
+            fmt.setStart(start_num)
+            if indent > 0:
+                fmt.setIndent(indent)
+            self._cursor.createList(fmt)
+            self._cursor.endEditBlock()
 
     def apply_style(self, style_name: str) -> None:
         bf = self._cursor.blockFormat()
@@ -980,8 +1051,19 @@ class PaginatedCanvas(QAbstractScrollArea):
             self._lens_selections_with_range.append((f.start_pos, f.end_pos, sel))
         self.viewport().update()
 
+    def _create_color_icon(self, color_hex: str, size: int = 14) -> QIcon:
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(QBrush(QColor(color_hex)))
+        painter.setPen(QPen(QColor(120, 120, 140, 160), 1))
+        painter.drawRoundedRect(0, 0, size - 1, size - 1, 3, 3)
+        painter.end()
+        return QIcon(pixmap)
+
     def contextMenuEvent(self, event):
-        """Context menu with intelligent spelling suggestions and standard text editing."""
+        """Context menu with intelligent review fixes, spelling suggestions, color options, and editing."""
         pos = self._screen_point_to_doc_position(event.position())
 
         menu = QMenu(self)
@@ -1008,43 +1090,114 @@ class PaginatedCanvas(QAbstractScrollArea):
             }
         """)
 
-        # Find if click is inside any spelling finding
-        spelling_finding = None
+        # Find all review findings encompassing click position
+        matched_findings = []
         if pos is not None and hasattr(self, "_lens_findings") and self._lens_findings:
             for f in self._lens_findings:
-                if getattr(f, "lens_type", "") == "spelling" and f.start_pos <= pos <= f.end_pos:
-                    spelling_finding = f
-                    break
+                if f.start_pos <= pos <= f.end_pos:
+                    matched_findings.append(f)
 
-        if spelling_finding:
-            # Lazily resolve suggestions on demand if not yet computed
-            if not spelling_finding.suggestions and getattr(self, "spell_engine", None):
-                spelling_finding.suggestions = self.spell_engine.get_suggestions(spelling_finding.text, limit=4)
+        if matched_findings:
+            for f in matched_findings:
+                lens_type = getattr(f, "lens_type", "")
+                if lens_type == "spelling":
+                    # Lazily resolve suggestions on demand if not yet computed
+                    if not f.suggestions and getattr(self, "spell_engine", None):
+                        f.suggestions = self.spell_engine.get_suggestions(f.text, limit=4)
 
-            # Top candidate suggestions
-            if spelling_finding.suggestions:
-                for sug in spelling_finding.suggestions:
-                    act = menu.addAction(f"✨ {sug}")
-                    font = act.font()
-                    font.setBold(True)
-                    act.setFont(font)
-                    act.triggered.connect(
-                        lambda _, s=sug, sf=spelling_finding: self.replace_range(sf.start_pos, sf.end_pos, s)
+                    if f.suggestions:
+                        for sug in f.suggestions:
+                            act = menu.addAction(f"✨ {sug}")
+                            font = act.font()
+                            font.setBold(True)
+                            act.setFont(font)
+                            act.triggered.connect(
+                                lambda _, s=sug, ff=f: self.replace_range(ff.start_pos, ff.end_pos, s)
+                            )
+                    else:
+                        act_no_sug = menu.addAction("No spelling suggestions")
+                        act_no_sug.setEnabled(False)
+
+                    menu.addSeparator()
+                    act_add_dict = menu.addAction(f"➕ Add '{f.text}' to Dictionary")
+                    act_add_dict.triggered.connect(
+                        lambda _, ff=f: self.addToDictionaryRequested.emit(ff.text)
                     )
-            else:
-                act_no_sug = menu.addAction("No spelling suggestions")
-                act_no_sug.setEnabled(False)
 
-            menu.addSeparator()
-            act_add_dict = menu.addAction(f"➕ Add '{spelling_finding.text}' to Dictionary")
-            act_add_dict.triggered.connect(
-                lambda _, sf=spelling_finding: self.addToDictionaryRequested.emit(sf.text)
-            )
+                    act_ignore = menu.addAction("👁 Ignore for Session")
+                    act_ignore.triggered.connect(
+                        lambda _, ff=f: self.ignoreWordRequested.emit(ff.text)
+                    )
+                    menu.addSeparator()
+                else:
+                    # Adverbs, filler phrases, passive voice, etc.
+                    lens_titles = {
+                        "adverb": "Weak Adverb",
+                        "filler": "Wordy Crutch",
+                        "passive": "Passive Voice",
+                        "dialogue": "Dialogue Voice",
+                        "pacing": "Pacing & Cadence",
+                    }
+                    title = lens_titles.get(lens_type, lens_type.capitalize())
+                    hdr = menu.addAction(f"💡 {title}: '{f.text}'")
+                    hdr.setEnabled(False)
 
-            act_ignore = menu.addAction("👁 Ignore for Session")
-            act_ignore.triggered.connect(
-                lambda _, sf=spelling_finding: self.ignoreWordRequested.emit(sf.text)
-            )
+                    if f.suggestions:
+                        for sug in f.suggestions:
+                            if sug == "(remove)":
+                                act = menu.addAction(f"🗑️ Remove '{f.text}'")
+                                act.triggered.connect(
+                                    lambda _, ff=f: self.replace_range(ff.start_pos, ff.end_pos, "")
+                                )
+                            elif sug in ("Rephrase in active voice", "(make subject the actor)", "Read aloud to check cadence"):
+                                act_info = menu.addAction(f"💡 {sug}")
+                                act_info.setEnabled(False)
+                            else:
+                                act = menu.addAction(f"✨ Swap with '{sug}'")
+                                font = act.font()
+                                font.setBold(True)
+                                act.setFont(font)
+                                act.triggered.connect(
+                                    lambda _, s=sug, ff=f: self.replace_range(ff.start_pos, ff.end_pos, s)
+                                )
+                    elif f.message:
+                        act_msg = menu.addAction(f"💡 {f.message[:60]}...")
+                        act_msg.setEnabled(False)
+
+                    menu.addSeparator()
+
+        # Quick Highlighting and Font Color for Selection
+        if self._cursor.hasSelection():
+            hl_menu = menu.addMenu("🎨 Highlight Selection")
+            palette_hl = [
+                ("Yellow", "#fef08a"),
+                ("Mint Green", "#bbf7d0"),
+                ("Sky Blue", "#bae6fd"),
+                ("Pink", "#fbcfe8"),
+                ("Amber", "#fed7aa"),
+                ("Lavender", "#e9d5ff"),
+            ]
+            for name, col_hex in palette_hl:
+                act_hl = hl_menu.addAction(self._create_color_icon(col_hex), name)
+                act_hl.triggered.connect(lambda _, c=col_hex: self.set_highlight_color(QColor(c)))
+
+            hl_menu.addSeparator()
+            act_clear_hl = hl_menu.addAction("🚫 Clear Highlight")
+            act_clear_hl.triggered.connect(self.clear_highlight)
+
+            color_menu = menu.addMenu("🔤 Font Color")
+            palette_fc = [
+                ("Default (Dark)", "#18181b"),
+                ("Royal Blue", "#2563eb"),
+                ("Crimson Red", "#dc2626"),
+                ("Emerald Green", "#15803d"),
+                ("Amber Brown", "#b45309"),
+                ("Deep Purple", "#7e22ce"),
+                ("Slate Gray", "#64748b"),
+            ]
+            for name, col_hex in palette_fc:
+                act_fc = color_menu.addAction(self._create_color_icon(col_hex), name)
+                act_fc.triggered.connect(lambda _, c=col_hex: self.set_text_color(QColor(c)))
 
             menu.addSeparator()
 
@@ -1088,10 +1241,25 @@ class PaginatedCanvas(QAbstractScrollArea):
         self.viewport().update()
 
     def replace_range(self, start_pos: int, end_pos: int, replacement_text: str) -> None:
-        """Replaces a specific text span in the manuscript with full undo support."""
+        """Replaces a specific text span in the manuscript with full undo support and whitespace cleanup."""
         c = QTextCursor(self._doc)
         c.setPosition(start_pos)
-        c.setPosition(min(end_pos, self._doc.characterCount() - 1), QTextCursor.MoveMode.KeepAnchor)
+        actual_end = min(end_pos, self._doc.characterCount() - 1)
+        if replacement_text == "":
+            c_check = QTextCursor(self._doc)
+            c_check.setPosition(actual_end)
+            c_check.setPosition(min(actual_end + 1, self._doc.characterCount() - 1), QTextCursor.MoveMode.KeepAnchor)
+            if c_check.selectedText() == " ":
+                actual_end = min(actual_end + 1, self._doc.characterCount() - 1)
+            elif start_pos > 0:
+                c_prev = QTextCursor(self._doc)
+                c_prev.setPosition(start_pos - 1)
+                c_prev.setPosition(start_pos, QTextCursor.MoveMode.KeepAnchor)
+                if c_prev.selectedText() == " ":
+                    start_pos -= 1
+                    c.setPosition(start_pos)
+
+        c.setPosition(actual_end, QTextCursor.MoveMode.KeepAnchor)
         c.insertText(replacement_text)
         self._cursor.setPosition(c.position())
         self.cursorPositionChanged.emit()

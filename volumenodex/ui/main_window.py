@@ -399,6 +399,9 @@ class MainWindow(QMainWindow):
         self.ribbon.strikeToggled.connect(self._toggle_strike)
         self.ribbon.textColorRequested.connect(self._choose_text_color)
         self.ribbon.highlightColorRequested.connect(self._choose_highlight_color)
+        self.ribbon.textColorSelected.connect(self.canvas_area.set_text_color)
+        self.ribbon.highlightColorSelected.connect(self.canvas_area.set_highlight_color)
+        self.ribbon.clearHighlightRequested.connect(self.canvas_area.clear_highlight)
 
         # Paragraph Alignment & Spacing
         self.ribbon.alignLeftRequested.connect(lambda: ed.setAlignment(Qt.AlignmentFlag.AlignLeft))

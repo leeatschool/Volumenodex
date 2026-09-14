@@ -52,24 +52,58 @@ class RevisionLensEngine:
 
     # High-impact verb replacements for common adverbs
     ADVERB_REPLACEMENTS: Dict[str, List[str]] = {
-        "quietly": ["whispered", "murmured", "tiptoed", "crept", "slipped"],
-        "quickly": ["bolted", "dashed", "sprinted", "hurried", "darted"],
-        "loudly": ["bellowed", "thundered", "roared", "clamored", "barked"],
-        "slowly": ["inched", "drifted", "crawled", "lingered", "lagged"],
-        "softly": ["breathed", "murmured", "whispered", "brushed", "muttered"],
-        "angrily": ["snapped", "fumed", "seethed", "raged", "glowered"],
-        "happily": ["beamed", "grinned", "rejoiced", "cheered"],
-        "sadly": ["mourned", "grieved", "sighed", "lamented"],
-        "suddenly": ["abruptly", "without warning", "(remove)"],
-        "calmly": ["steadied", "composed", "soothed"],
-        "carefully": ["measured", "studied", "scrutinized", "weighed"],
-        "nervously": ["fidgeted", "trembled", "hesitated"],
-        "anxiously": ["dreaded", "paced", "fretted"],
-        "eagerly": ["yearned", "hungered", "craved"],
-        "patiently": ["awaited", "endured", "bided"],
-        "rudely": ["insulted", "scoffed", "sneered"],
-        "politely": ["deferred", "bowed", "nodded"],
-        "bravely": ["dared", "faced", "stood firm"],
+        "quietly": ["whispered", "murmured", "tiptoed", "crept", "slipped", "(remove)"],
+        "quickly": ["bolted", "dashed", "sprinted", "hurried", "darted", "(remove)"],
+        "loudly": ["bellowed", "thundered", "roared", "clamored", "barked", "(remove)"],
+        "slowly": ["inched", "drifted", "crawled", "lingered", "plodded", "(remove)"],
+        "softly": ["breathed", "murmured", "whispered", "brushed", "muttered", "(remove)"],
+        "angrily": ["snapped", "fumed", "seethed", "raged", "glowered", "(remove)"],
+        "happily": ["beamed", "grinned", "rejoiced", "cheered", "bounded", "(remove)"],
+        "sadly": ["mourned", "grieved", "sighed", "lamented", "wept", "(remove)"],
+        "suddenly": ["erupted", "burst", "shattered", "jolted", "(remove)"],
+        "calmly": ["steadied", "composed", "soothed", "(remove)"],
+        "carefully": ["measured", "studied", "scrutinized", "weighed", "(remove)"],
+        "nervously": ["fidgeted", "trembled", "hesitated", "flinched", "(remove)"],
+        "anxiously": ["dreaded", "paced", "fretted", "agonized", "(remove)"],
+        "eagerly": ["yearned", "hungered", "craved", "leaped", "(remove)"],
+        "patiently": ["awaited", "endured", "bided", "(remove)"],
+        "rudely": ["insulted", "scoffed", "sneered", "snapped", "(remove)"],
+        "politely": ["deferred", "bowed", "nodded", "(remove)"],
+        "bravely": ["confronted", "dared", "stood firm", "charged", "(remove)"],
+        "fiercely": ["clashed", "fought", "raged", "battled", "(remove)"],
+        "gently": ["stroked", "patted", "nudged", "cradled", "(remove)"],
+        "heavily": ["slumped", "collapsed", "slammed", "sank", "(remove)"],
+        "tightly": ["gripped", "clutched", "grasped", "clamped", "(remove)"],
+        "sharply": ["snapped", "pierced", "jabbed", "flared", "(remove)"],
+        "brightly": ["beamed", "flashed", "glittered", "shone", "(remove)"],
+        "wildly": ["raged", "thrashed", "surged", "spun", "(remove)"],
+        "easily": ["sailed", "breezed", "glided", "swept", "(remove)"],
+        "coldly": ["sneered", "dismissed", "chilled", "glared", "(remove)"],
+        "warmly": ["embraced", "welcomed", "beamed", "greeted", "(remove)"],
+        "deeply": ["plunged", "inhaled", "probed", "delved", "(remove)"],
+        "greedily": ["devoured", "grabbed", "snatched", "guzzled", "(remove)"],
+        "harshly": ["rasped", "grated", "rebuked", "chided", "(remove)"],
+        "intently": ["scrutinized", "stared", "tracked", "surveyed", "(remove)"],
+        "joyfully": ["celebrated", "danced", "exulted", "cheered", "(remove)"],
+        "knowingly": ["winked", "smirked", "nodded", "(remove)"],
+        "lazily": ["lounged", "sprawled", "ambled", "drowsed", "(remove)"],
+        "neatly": ["arranged", "aligned", "tucked", "(remove)"],
+        "proudly": ["boasted", "swaggered", "displayed", "(remove)"],
+        "roughly": ["shoved", "wrestled", "jarred", "barked", "(remove)"],
+        "silently": ["crept", "slipped", "watched", "waited", "(remove)"],
+        "smoothly": ["glided", "slid", "flowed", "(remove)"],
+        "tirelessly": ["labored", "toiled", "persisted", "forged", "(remove)"],
+        "violently": ["slammed", "shook", "convulsed", "exploded", "(remove)"],
+        "wearily": ["trudged", "slumped", "plodded", "sighed", "(remove)"],
+        "urgently": ["pleaded", "demanded", "pressed", "insisted", "(remove)"],
+        "bitterly": ["resented", "scoffed", "mourned", "(remove)"],
+        "awkwardly": ["stumbled", "fumbled", "shuffled", "(remove)"],
+        "cautiously": ["tiptoed", "hesitated", "probed", "(remove)"],
+        "desperately": ["scrambled", "clawed", "begged", "(remove)"],
+        "hastily": ["scribbled", "shoved", "retreated", "(remove)"],
+        "impatiently": ["tapped", "paced", "interrupted", "(remove)"],
+        "rapidly": ["accelerated", "surged", "soared", "(remove)"],
+        "swiftly": ["darted", "struck", "intercepted", "(remove)"],
         "very": ["(remove)", "exceptionally", "profoundly"],
         "really": ["(remove)", "genuinely", "truly"],
         "quite": ["(remove)", "rather"],
@@ -180,6 +214,46 @@ class RevisionLensEngine:
         return findings
 
     @classmethod
+    def _get_adverb_suggestions(cls, w_lower: str) -> List[str]:
+        """Provides punchy active verbs to replace weak adverbs, avoiding instructional phrases."""
+        if w_lower in cls.ADVERB_REPLACEMENTS:
+            return list(cls.ADVERB_REPLACEMENTS[w_lower])
+        # Smart action verbs for unlisted adverbs
+        return ["(remove)", "surged", "darted", "pressed", "struck", "lingered"]
+
+    @classmethod
+    def _get_passive_suggestions(cls, phrase: str) -> List[str]:
+        """Suggests direct active verbs for passive voice constructions."""
+        words = phrase.split()
+        if len(words) >= 2:
+            participle = words[-1].lower()
+            active_map = {
+                "written": ["wrote", "drafted", "penned"],
+                "seen": ["saw", "spotted", "observed"],
+                "transcribed": ["transcribed", "copied", "recorded"],
+                "taken": ["took", "seized", "captured"],
+                "given": ["gave", "granted", "bestowed"],
+                "done": ["did", "executed", "completed"],
+                "found": ["found", "discovered", "uncovered"],
+                "chosen": ["chose", "selected", "picked"],
+                "broken": ["broke", "shattered", "fractured"],
+                "felt": ["felt", "sensed"],
+                "heard": ["heard", "caught"],
+                "drawn": ["drew", "sketched", "pulled"],
+                "built": ["built", "constructed", "erected"],
+                "made": ["made", "crafted", "created"],
+                "told": ["told", "informed", "recounted"],
+                "said": ["said", "declared", "stated"],
+                "embossed": ["embossed", "stamped", "pressed"],
+                "measured": ["measured", "gauged", "calculated"],
+            }
+            if participle in active_map:
+                return list(active_map[participle])
+            if participle.endswith("ed"):
+                return [participle]
+        return []
+
+    @classmethod
     def _find_adverbs(cls, text: str) -> List[LensFinding]:
         """Flags -ly adverbs and weak soft modifiers using fast targeted matching."""
         findings = []
@@ -194,7 +268,7 @@ class RevisionLensEngine:
                 is_adverb = True
 
             if is_adverb:
-                suggestions = cls.ADVERB_REPLACEMENTS.get(w_lower, ["(remove)", "rephrase with a punchy verb"])
+                suggestions = cls._get_adverb_suggestions(w_lower)
                 snippet = cls._extract_snippet(text, match.start(), match.end())
                 msg = f"Weak adverb or modifier '{word}'. Strong verbs create more vivid prose."
                 findings.append(LensFinding(
@@ -212,11 +286,12 @@ class RevisionLensEngine:
 
     @classmethod
     def _find_passive_voice(cls, text: str) -> List[LensFinding]:
-        """Detects passive constructions."""
+        """Detects passive constructions and offers active verb swaps."""
         findings = []
         for match in cls.PASSIVE_REGEX.finditer(text):
             phrase = match.group(0)
             snippet = cls._extract_snippet(text, match.start(), match.end())
+            suggestions = cls._get_passive_suggestions(phrase)
             findings.append(LensFinding(
                 lens_type="passive",
                 start_pos=match.start(),
@@ -224,7 +299,7 @@ class RevisionLensEngine:
                 text=phrase,
                 color=cls.COLOR_PASSIVE,
                 message=f"Passive voice: '{phrase}'. Active voice places the actor first.",
-                suggestions=["Rephrase in active voice", "(make subject the actor)"],
+                suggestions=suggestions,
                 context_snippet=snippet,
             ))
         return findings

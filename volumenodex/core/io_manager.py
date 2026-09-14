@@ -5,12 +5,12 @@ import os
 from typing import Optional, Dict, Any
 import docx
 from docx.shared import Inches, Pt, RGBColor
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_COLOR_INDEX
 
 from PySide6.QtCore import Qt, QSizeF, QMarginsF
 from PySide6.QtGui import (
     QTextDocument, QTextCursor, QTextBlock, QTextCharFormat,
-    QTextBlockFormat, QFont, QPageSize, QPageLayout
+    QTextBlockFormat, QFont, QColor, QPageSize, QPageLayout
 )
 from PySide6.QtPrintSupport import QPrinter
 
@@ -19,6 +19,51 @@ from volumenodex.core.document_model import PageLayoutModel, PaperSizePreset, Or
 
 class IOManager:
     """Handles native .docx file IO, high-resolution PDF export, RTF, and .story.json companion metadata."""
+
+    @staticmethod
+    def _qcolor_to_docx_highlight(qcol: QColor) -> Optional[WD_COLOR_INDEX]:
+        """Maps a QColor to the closest standard Microsoft Word highlight color enum."""
+        r, g, b = qcol.red(), qcol.green(), qcol.blue()
+        highlights = [
+            (WD_COLOR_INDEX.YELLOW, 254, 240, 138),
+            (WD_COLOR_INDEX.BRIGHT_GREEN, 187, 247, 208),
+            (WD_COLOR_INDEX.TURQUOISE, 165, 243, 252),
+            (WD_COLOR_INDEX.PINK, 251, 207, 232),
+            (WD_COLOR_INDEX.DARK_YELLOW, 254, 215, 170),
+            (WD_COLOR_INDEX.VIOLET, 233, 213, 255),
+            (WD_COLOR_INDEX.BLUE, 186, 230, 253),
+            (WD_COLOR_INDEX.GREEN, 134, 239, 172),
+            (WD_COLOR_INDEX.TEAL, 153, 246, 228),
+            (WD_COLOR_INDEX.GRAY_25, 229, 231, 235),
+            (WD_COLOR_INDEX.RED, 254, 202, 202),
+        ]
+        best_enum = None
+        min_dist = float("inf")
+        for hl_enum, hr, hg, hb in highlights:
+            dist = (r - hr) ** 2 + (g - hg) ** 2 + (b - hb) ** 2
+            if dist < min_dist:
+                min_dist = dist
+                best_enum = hl_enum
+        return best_enum
+
+    @staticmethod
+    def _docx_highlight_to_qcolor(hl_enum: Any) -> Optional[QColor]:
+        """Maps a Microsoft Word highlight color enum back to a soft QColor."""
+        hl_map = {
+            WD_COLOR_INDEX.YELLOW: QColor("#fef08a"),
+            WD_COLOR_INDEX.BRIGHT_GREEN: QColor("#bbf7d0"),
+            WD_COLOR_INDEX.TURQUOISE: QColor("#a5f3fc"),
+            WD_COLOR_INDEX.PINK: QColor("#fbcfe8"),
+            WD_COLOR_INDEX.DARK_YELLOW: QColor("#fed7aa"),
+            WD_COLOR_INDEX.VIOLET: QColor("#e9d5ff"),
+            WD_COLOR_INDEX.BLUE: QColor("#bae6fd"),
+            WD_COLOR_INDEX.GREEN: QColor("#86efac"),
+            WD_COLOR_INDEX.TEAL: QColor("#99f6e4"),
+            WD_COLOR_INDEX.GRAY_25: QColor("#e5e7eb"),
+            WD_COLOR_INDEX.GRAY_50: QColor("#9ca3af"),
+            WD_COLOR_INDEX.RED: QColor("#fecaca"),
+        }
+        return hl_map.get(hl_enum, QColor("#fef08a"))
 
     @staticmethod
     def get_companion_path(doc_path: str) -> str:
@@ -79,6 +124,22 @@ class IOManager:
                                     run.font.name = font.family()
                                 if font.pointSize() > 0:
                                     run.font.size = Pt(font.pointSize())
+
+                                # Foreground Text Color
+                                fg_brush = fmt.foreground()
+                                if fg_brush.style() != Qt.BrushStyle.NoBrush:
+                                    fg_col = fg_brush.color()
+                                    if fg_col.isValid() and fg_col.alpha() > 0:
+                                        run.font.color.rgb = RGBColor(fg_col.red(), fg_col.green(), fg_col.blue())
+
+                                # Background Highlight Color
+                                bg_brush = fmt.background()
+                                if bg_brush.style() != Qt.BrushStyle.NoBrush:
+                                    bg_col = bg_brush.color()
+                                    if bg_col.isValid() and bg_col.alpha() > 0:
+                                        hl_enum = IOManager._qcolor_to_docx_highlight(bg_col)
+                                        if hl_enum is not None:
+                                            run.font.highlight_color = hl_enum
                             it += 1
 
                 # Apply paragraph alignment
@@ -132,6 +193,18 @@ class IOManager:
                             char_fmt.setFontFamily(run.font.name)
                         if run.font.size:
                             char_fmt.setFontPointSize(run.font.size.pt)
+
+                        # Restore Foreground Text Color
+                        if run.font.color and run.font.color.rgb:
+                            rgb = run.font.color.rgb
+                            char_fmt.setForeground(QColor(rgb[0], rgb[1], rgb[2]))
+
+                        # Restore Background Highlight Color
+                        if run.font.highlight_color:
+                            hl_color = IOManager._docx_highlight_to_qcolor(run.font.highlight_color)
+                            if hl_color:
+                                char_fmt.setBackground(hl_color)
+
                         cursor.insertText(run.text, char_fmt)
                     cursor.insertBlock()
 

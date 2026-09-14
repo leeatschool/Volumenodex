@@ -1,7 +1,10 @@
 """Modern Fluent Ribbon Bar with crisp vector icons, sleek typography, and refined groups."""
 
 from PySide6.QtCore import Qt, Signal, QSize
-from PySide6.QtGui import QFont, QFontDatabase, QColor, QIcon, QKeySequence
+from PySide6.QtGui import (
+    QFont, QFontDatabase, QColor, QIcon, QKeySequence,
+    QPixmap, QPainter, QBrush, QPen
+)
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QToolButton,
     QComboBox, QSpinBox, QSlider, QLabel, QFrame, QMenu,
@@ -66,6 +69,9 @@ class RibbonBar(QWidget):
     strikeToggled = Signal()
     textColorRequested = Signal()
     highlightColorRequested = Signal()
+    textColorSelected = Signal(QColor)
+    highlightColorSelected = Signal(QColor)
+    clearHighlightRequested = Signal()
     alignLeftRequested = Signal()
     alignCenterRequested = Signal()
     alignRightRequested = Signal()
@@ -235,6 +241,17 @@ class RibbonBar(QWidget):
         if hasattr(self, "lbl_autosave_badge"):
             self.lbl_autosave_badge.setText(text)
 
+    def _create_color_icon(self, color_hex: str, size: int = 14) -> QIcon:
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(QBrush(QColor(color_hex)))
+        painter.setPen(QPen(QColor(120, 120, 140, 160), 1))
+        painter.drawRoundedRect(0, 0, size - 1, size - 1, 3, 3)
+        painter.end()
+        return QIcon(pixmap)
+
     def _create_tool_button(self, icon_name: str, tooltip: str, text: str = "", checkable: bool = False, width: int = 30) -> QToolButton:
         btn = QToolButton()
         if icon_name:
@@ -385,12 +402,95 @@ class RibbonBar(QWidget):
         self.btn_strike.clicked.connect(self.strikeToggled.emit)
         h_f2.addWidget(self.btn_strike)
 
-        self.btn_text_color = self._create_tool_button("text_color", "Text Color", width=28)
+        # Text Color with Quick Palette Menu
+        self.btn_text_color = self._create_tool_button("text_color", "Text Color", width=34)
+        self.btn_text_color.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self.btn_text_color.clicked.connect(self.textColorRequested.emit)
+        text_col_menu = QMenu(self.btn_text_color)
+        text_col_menu.setStyleSheet("""
+            QMenu {
+                background-color: #1f2335;
+                color: #c0caf5;
+                border: 1px solid #292e42;
+                border-radius: 6px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 4px 18px 4px 10px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #2e344e;
+                color: #7aa2f7;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #292e42;
+                margin: 4px 6px;
+            }
+        """)
+        palette_fc = [
+            ("Default (Dark)", "#18181b"),
+            ("Royal Blue", "#2563eb"),
+            ("Crimson Red", "#dc2626"),
+            ("Emerald Green", "#15803d"),
+            ("Amber Brown", "#b45309"),
+            ("Deep Purple", "#7e22ce"),
+            ("Slate Gray", "#64748b"),
+        ]
+        for name, hex_col in palette_fc:
+            act = text_col_menu.addAction(self._create_color_icon(hex_col), name)
+            act.triggered.connect(lambda _, c=hex_col: self.textColorSelected.emit(QColor(c)))
+        text_col_menu.addSeparator()
+        act_more_text = text_col_menu.addAction("🎨 More Colors...")
+        act_more_text.triggered.connect(self.textColorRequested.emit)
+        self.btn_text_color.setMenu(text_col_menu)
         h_f2.addWidget(self.btn_text_color)
 
-        self.btn_highlight = self._create_tool_button("highlight", "Highlight Color", width=28)
+        # Highlight Color with Quick Palette Menu
+        self.btn_highlight = self._create_tool_button("highlight", "Highlight Color", width=34)
+        self.btn_highlight.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         self.btn_highlight.clicked.connect(self.highlightColorRequested.emit)
+        hl_menu = QMenu(self.btn_highlight)
+        hl_menu.setStyleSheet("""
+            QMenu {
+                background-color: #1f2335;
+                color: #c0caf5;
+                border: 1px solid #292e42;
+                border-radius: 6px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 4px 18px 4px 10px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #2e344e;
+                color: #7aa2f7;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #292e42;
+                margin: 4px 6px;
+            }
+        """)
+        palette_hl = [
+            ("Yellow", "#fef08a"),
+            ("Mint Green", "#bbf7d0"),
+            ("Sky Blue", "#bae6fd"),
+            ("Pink", "#fbcfe8"),
+            ("Amber", "#fed7aa"),
+            ("Lavender", "#e9d5ff"),
+        ]
+        for name, hex_col in palette_hl:
+            act = hl_menu.addAction(self._create_color_icon(hex_col), name)
+            act.triggered.connect(lambda _, c=hex_col: self.highlightColorSelected.emit(QColor(c)))
+        hl_menu.addSeparator()
+        act_clear_hl = hl_menu.addAction("🚫 Clear Highlight")
+        act_clear_hl.triggered.connect(self.clearHighlightRequested.emit)
+        act_more_hl = hl_menu.addAction("🎨 More Colors...")
+        act_more_hl.triggered.connect(self.highlightColorRequested.emit)
+        self.btn_highlight.setMenu(hl_menu)
         h_f2.addWidget(self.btn_highlight)
 
         self.btn_bullet = self._create_tool_button("bullet_list", "Bulleted List", width=28)
