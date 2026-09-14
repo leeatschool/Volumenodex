@@ -129,8 +129,8 @@ class RibbonBar(QWidget):
     rulerToggled = Signal(bool)
     zoomChanged = Signal(float)
     themeChanged = Signal(str)
-    typewriterSoundChanged = Signal(TypewriterSoundPreset)
-    ambientSoundChanged = Signal(AmbientSoundPreset)
+    typewriterSoundChanged = Signal(object)
+    ambientSoundChanged = Signal(object)
     typewriterVolumeChanged = Signal(int)
     ambientVolumeChanged = Signal(int)
 
@@ -141,6 +141,7 @@ class RibbonBar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(126)
+        self._audio_engine = None
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -148,6 +149,7 @@ class RibbonBar(QWidget):
 
         self.tab_widget = QTabWidget()
         self.tab_widget.setDocumentMode(True)
+        self.tab_widget.currentChanged.connect(self._on_tab_changed_internal)
         main_layout.addWidget(self.tab_widget)
 
         self._build_header_controls()
@@ -159,6 +161,10 @@ class RibbonBar(QWidget):
         self._build_review_tab()
         self._build_aesthetics_tab()
         self._build_view_tab()
+
+    def _on_tab_changed_internal(self, index: int) -> None:
+        if self.tab_widget.tabText(index) == "Aesthetics":
+            self.update_sound_presets()
 
     def _build_header_controls(self) -> None:
         """Constructs Quick Access header controls in the top tab bar."""
@@ -1032,10 +1038,8 @@ class RibbonBar(QWidget):
         v_tw.setSpacing(3)
 
         self.typewriter_combo = QComboBox()
-        for tp in TypewriterSoundPreset:
-            self.typewriter_combo.addItem(tp.value, tp)
         self.typewriter_combo.currentIndexChanged.connect(
-            lambda: self.typewriterSoundChanged.emit(self.typewriter_combo.currentData())
+            lambda: self.typewriter_combo.currentData() is not None and self.typewriterSoundChanged.emit(self.typewriter_combo.currentData())
         )
         v_tw.addWidget(self.typewriter_combo)
 
@@ -1062,10 +1066,8 @@ class RibbonBar(QWidget):
         v_amb.setSpacing(3)
 
         self.ambient_combo = QComboBox()
-        for ap in AmbientSoundPreset:
-            self.ambient_combo.addItem(ap.value, ap)
         self.ambient_combo.currentIndexChanged.connect(
-            lambda: self.ambientSoundChanged.emit(self.ambient_combo.currentData())
+            lambda: self.ambient_combo.currentData() is not None and self.ambientSoundChanged.emit(self.ambient_combo.currentData())
         )
         v_amb.addWidget(self.ambient_combo)
 
@@ -1085,8 +1087,55 @@ class RibbonBar(QWidget):
         ambient_group.add_layout(v_amb)
         layout.addWidget(ambient_group)
 
+        # Automatically populate sound variation combos with only available sounds
+        self.update_sound_presets()
+
         layout.addStretch()
         self.tab_widget.addTab(tab, "Aesthetics")
+
+    def update_sound_presets(self, audio_engine=None) -> None:
+        """Populates typewriter and ambient combo boxes with only variations that have sound files."""
+        if audio_engine is not None:
+            self._audio_engine = audio_engine
+        elif self._audio_engine is not None:
+            audio_engine = self._audio_engine
+        else:
+            from volumenodex.audio.audio_engine import AudioEngine
+            audio_engine = AudioEngine()
+            self._audio_engine = audio_engine
+
+        # Populate Typewriter Acoustics combo
+        current_tw = self.typewriter_combo.currentData() if hasattr(self, "typewriter_combo") else None
+        if hasattr(self, "typewriter_combo"):
+            self.typewriter_combo.blockSignals(True)
+            self.typewriter_combo.clear()
+            tw_presets = audio_engine.get_available_typewriter_presets()
+            tw_idx = 0
+            for i, (label, val) in enumerate(tw_presets):
+                self.typewriter_combo.addItem(label, val)
+                if current_tw is not None and val == current_tw:
+                    tw_idx = i
+                elif current_tw is None and val == audio_engine.typewriter_preset:
+                    tw_idx = i
+            self.typewriter_combo.setCurrentIndex(tw_idx)
+            self.typewriter_combo.blockSignals(False)
+
+        # Populate Ambient Soundscapes combo
+        current_amb = self.ambient_combo.currentData() if hasattr(self, "ambient_combo") else None
+        if hasattr(self, "ambient_combo"):
+            self.ambient_combo.blockSignals(True)
+            self.ambient_combo.clear()
+            amb_presets = audio_engine.get_available_ambient_presets()
+            amb_idx = 0
+            for i, (label, val) in enumerate(amb_presets):
+                self.ambient_combo.addItem(label, val)
+                if current_amb is not None and val == current_amb:
+                    amb_idx = i
+                elif current_amb is None and val == audio_engine.ambient_preset:
+                    amb_idx = i
+            self.ambient_combo.setCurrentIndex(amb_idx)
+            self.ambient_combo.blockSignals(False)
+
 
     def _build_view_tab(self) -> None:
         tab = QWidget()

@@ -478,6 +478,12 @@ class MainWindow(QMainWindow):
         self.ribbon.typewriterVolumeChanged.connect(self.audio_engine.set_effects_volume)
         self.ribbon.ambientVolumeChanged.connect(self.audio_engine.set_ambient_volume)
 
+        # Wire live audio engine preset updates to ribbon
+        self.ribbon.update_sound_presets(self.audio_engine)
+        self.audio_engine.availablePresetsChanged.connect(
+            lambda: self.ribbon.update_sound_presets(self.audio_engine)
+        )
+
         # Corkboard mode switching & synchronization
         self.ribbon.btn_corkboard.clicked.connect(self.toggle_corkboard_mode)
         self.corkboard_view.returnToManuscriptRequested.connect(self.show_manuscript_mode)

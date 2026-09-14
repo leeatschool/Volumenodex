@@ -307,3 +307,64 @@ def test_window_icon_configured(app):
     finally:
         win.close()
 
+
+def test_sound_variations_hidden_when_no_audio_file(app, tmp_path):
+    """Validates that sound variations do not appear in the UI if their audio files do not exist."""
+    from volumenodex.audio.audio_engine import AudioEngine, TypewriterSoundPreset, AmbientSoundPreset
+    from volumenodex.ui.ribbon import RibbonBar
+
+    # Test in an isolated temporary sounds directory
+    temp_sounds = tmp_path / "assets" / "sounds"
+    temp_sounds.mkdir(parents=True, exist_ok=True)
+
+    engine = AudioEngine(base_dir=str(tmp_path))
+    # When folder is completely empty, only Off is available
+    tw_avail = [p[1] for p in engine.get_available_typewriter_presets()]
+    amb_avail = [p[1] for p in engine.get_available_ambient_presets()]
+    assert tw_avail == [TypewriterSoundPreset.OFF]
+    assert amb_avail == [AmbientSoundPreset.OFF]
+
+    # Create dummy audio files for specific presets
+    test_wav = temp_sounds / "electric_click.wav"
+    test_wav.write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00")
+
+    test_rain = temp_sounds / "Rain_Storm.wav"
+    test_rain.write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00")
+
+    engine.reload_sounds()
+    tw_avail2 = [p[1] for p in engine.get_available_typewriter_presets()]
+    amb_avail2 = [p[1] for p in engine.get_available_ambient_presets()]
+
+    # Electric Typewriter now appears because electric_click.wav exists
+    assert TypewriterSoundPreset.ELECTRIC in tw_avail2
+    # Manual and Soft Mechanical switches still do NOT appear
+    assert TypewriterSoundPreset.MANUAL not in tw_avail2
+    assert TypewriterSoundPreset.SOFT_MECHANICAL not in tw_avail2
+
+    # Rain now appears because Rain_Storm.wav exists
+    assert AmbientSoundPreset.RAIN in amb_avail2
+    # Fireplace, Library, etc. do NOT appear
+    assert AmbientSoundPreset.FIREPLACE not in amb_avail2
+    assert AmbientSoundPreset.LIBRARY not in amb_avail2
+
+    # Verify ribbon combo boxes only show the available presets
+    ribbon = RibbonBar()
+    ribbon.update_sound_presets(engine)
+    tw_labels = [ribbon.typewriter_combo.itemText(i) for i in range(ribbon.typewriter_combo.count())]
+    amb_labels = [ribbon.ambient_combo.itemText(i) for i in range(ribbon.ambient_combo.count())]
+
+    assert "Electric Typewriter" in tw_labels
+    assert "Classic Manual Typewriter" not in tw_labels
+    assert "Soft Mechanical Switches" not in tw_labels
+
+    assert "Rain on Window" in amb_labels
+    assert "Quiet Library" not in amb_labels
+    assert "Crackling Fireplace" not in amb_labels
+
+    # Now remove the electric click file; verify it disappears upon reload
+    test_wav.unlink()
+    engine.reload_sounds()
+    ribbon.update_sound_presets(engine)
+    tw_labels_after = [ribbon.typewriter_combo.itemText(i) for i in range(ribbon.typewriter_combo.count())]
+    assert "Electric Typewriter" not in tw_labels_after
+
