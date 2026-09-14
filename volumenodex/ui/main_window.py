@@ -437,6 +437,13 @@ class MainWindow(QMainWindow):
         act_insp.triggered.connect(self._toggle_inspector_panel)
         view_menu.addAction(act_insp)
 
+        view_menu.addSeparator()
+
+        act_ref = QAction("Writers Reference...", self)
+        act_ref.setShortcut(QKeySequence("Ctrl+Shift+R"))
+        act_ref.triggered.connect(self.open_writers_reference)
+        view_menu.addAction(act_ref)
+
         # Settings Menu
         settings_menu = menu_bar.addMenu("&Settings")
 
@@ -637,6 +644,7 @@ class MainWindow(QMainWindow):
         self.ribbon.printRequested.connect(lambda: self.print_document(low_ink=False))
         if hasattr(self.ribbon, "btn_header_print"):
             self.ribbon.btn_header_print.clicked.connect(lambda: self.print_document(low_ink=False))
+        self.ribbon.writersReferenceRequested.connect(self.open_writers_reference)
 
         # Status Bar Daily Goal Progress Ring
         if hasattr(self.status_bar, "progress_ring"):
@@ -1848,3 +1856,20 @@ class MainWindow(QMainWindow):
         self.settings_manager.autosave_enabled = True
         self.settings_manager.autosave_interval_minutes = minutes
         self.settings_manager.save()
+
+    def open_writers_reference(self) -> None:
+        """Opens the offline Writers Reference knowledge compendium window."""
+        if not hasattr(self, "writers_reference_dialog") or self.writers_reference_dialog is None:
+            from volumenodex.ui.writers_reference_dialog import WritersReferenceDialog
+            self.writers_reference_dialog = WritersReferenceDialog(parent=self)
+            self.writers_reference_dialog.insertIntoDocumentRequested.connect(self._insert_reference_text)
+        self.writers_reference_dialog.show()
+        self.writers_reference_dialog.raise_()
+        self.writers_reference_dialog.activateWindow()
+
+    def _insert_reference_text(self, text: str) -> None:
+        """Inserts text from Writers Reference directly at current cursor position in canvas."""
+        cursor = self.canvas_area._cursor
+        cursor.insertText(text)
+        self.canvas_area.update()
+        self.statusBar().showMessage("Reference text inserted into manuscript.", 3000)

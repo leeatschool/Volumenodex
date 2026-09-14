@@ -149,6 +149,7 @@ class RibbonBar(QWidget):
     saveRequested = Signal()
     printRequested = Signal()
     settingsRequested = Signal()
+    writersReferenceRequested = Signal()
 
     def minimumSizeHint(self) -> QSize:
         return QSize(320, 126)
@@ -269,6 +270,34 @@ class RibbonBar(QWidget):
         """)
         self.btn_header_print.clicked.connect(self.printRequested.emit)
         left_layout.addWidget(self.btn_header_print)
+
+        self.btn_header_reference = QPushButton("Writers Reference")
+        self.btn_header_reference.setObjectName("headerRefBtn")
+        self.btn_header_reference.setIcon(VectorIconFactory.create_icon("book", color="#c0caf5", size=16))
+        self.btn_header_reference.setIconSize(QSize(16, 16))
+        self.btn_header_reference.setToolTip("Open Writers Reference — Offline Fiction Encyclopedia (Ctrl+Shift+R)")
+        self.btn_header_reference.setStyleSheet("""
+            QPushButton#headerRefBtn {
+                background-color: #24283b;
+                color: #c0caf5;
+                border: 1px solid #3b4261;
+                border-radius: 4px;
+                padding: 3px 10px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton#headerRefBtn:hover {
+                background-color: #2e344e;
+                border-color: #7aa2f7;
+                color: #ffffff;
+            }
+            QPushButton#headerRefBtn:pressed {
+                background-color: #7aa2f7;
+                color: #1a1b26;
+            }
+        """)
+        self.btn_header_reference.clicked.connect(self.writersReferenceRequested.emit)
+        left_layout.addWidget(self.btn_header_reference)
 
         self.tab_widget.setCornerWidget(left_widget, Qt.Corner.TopLeftCorner)
 
@@ -1013,6 +1042,16 @@ class RibbonBar(QWidget):
         self.btn_pet.clicked.connect(self.writingPetToggled.emit)
         pet_group.add_widget(self.btn_pet)
         layout.addWidget(pet_group)
+        layout.addWidget(create_ribbon_separator())
+
+        self.ref_group = ModernRibbonGroup("Reference")
+        self.btn_writers_reference = self._create_tool_button(
+            "book", "Open Writers Reference — Offline Fiction Encyclopedia (Ctrl+Shift+R)",
+            text="Writers Reference", width=145
+        )
+        self.btn_writers_reference.clicked.connect(self.writersReferenceRequested.emit)
+        self.ref_group.add_widget(self.btn_writers_reference)
+        layout.addWidget(self.ref_group)
 
         layout.addStretch()
         self.story_tab_idx = self.tab_widget.count()

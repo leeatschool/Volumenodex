@@ -162,6 +162,8 @@ class SettingsManager(QObject):
             self._settings.sync()
         return self.daily_words_count
 
+    record_words = record_words_written
+
     def get_autosave_label(self) -> str:
         """Returns a human-readable summary badge string for UI headers."""
         if not self.autosave_enabled:
