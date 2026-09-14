@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
 
 from volumenodex.reference.reference_model import ReferenceEntry, ReferenceCategory
 from volumenodex.reference.reference_manager import ReferenceManager
-from volumenodex.reference.builder_tool import ReferenceEntryEditorDialog, ReferenceBuilderWindow
 from volumenodex.ui.vector_icons import VectorIconFactory
 
 
@@ -221,17 +220,6 @@ class WritersReferenceDialog(QDialog):
         h_header.addStretch()
 
         # Top Action Buttons
-        btn_add = QPushButton("➕ Add to Reference")
-        btn_add.setObjectName("primaryBtn")
-        btn_add.setToolTip("Create a new reference topic in your personal compendium")
-        btn_add.clicked.connect(self._open_add_entry_dialog)
-        h_header.addWidget(btn_add)
-
-        btn_manage = QPushButton("⚙️ Manager Studio")
-        btn_manage.setToolTip("Open full Reference Management Studio (import, export, edit)")
-        btn_manage.clicked.connect(self._open_manager_studio)
-        h_header.addWidget(btn_manage)
-
         btn_logo = QPushButton("🖼️ Set Logo...")
         btn_logo.setToolTip("Select a custom image file for the Writers Reference emblem")
         btn_logo.clicked.connect(self._choose_custom_logo)
@@ -343,16 +331,6 @@ class WritersReferenceDialog(QDialog):
         self.btn_copy_facts.setToolTip("Copy quick reference summary and table to clipboard")
         self.btn_copy_facts.clicked.connect(self._copy_facts_to_clipboard)
         h_actions.addWidget(self.btn_copy_facts)
-
-        self.btn_edit_entry = QPushButton("✏️ Edit Entry")
-        self.btn_edit_entry.setToolTip("Edit this topic")
-        self.btn_edit_entry.clicked.connect(self._edit_current_entry)
-        h_actions.addWidget(self.btn_edit_entry)
-
-        self.btn_delete_entry = QPushButton("🗑️ Delete")
-        self.btn_delete_entry.setToolTip("Delete custom topic")
-        self.btn_delete_entry.clicked.connect(self._delete_current_entry)
-        h_actions.addWidget(self.btn_delete_entry)
 
         h_actions.addStretch()
         v_right.addLayout(h_actions)
@@ -511,24 +489,25 @@ class WritersReferenceDialog(QDialog):
 
     def _render_empty_state(self) -> None:
         self._current_entry = None
-        html = """
-        <div style="text-align: center; padding-top: 80px; color: #8c91b0;">
-            <h2 style="color: #7aa2f7; font-size: 20px;">No Matching Topics Found</h2>
-            <p style="font-size: 13px;">Try searching with broader terms like <i>poison, sword, armor, peerage, sailing, wound</i>, or add this topic yourself.</p>
-            <p style="margin-top: 20px;">
-                <span style="background-color: #1f2335; color: #c0caf5; padding: 6px 14px; border-radius: 6px; border: 1px solid #2a2c3d;">
-                    Click <b>➕ Add to Reference</b> above to create a new offline reference topic.
-                </span>
-            </p>
-        </div>
-        """
+        if self.manager.total_count == 0:
+            html = """
+            <div style="text-align: center; padding-top: 80px; color: #8c91b0;">
+                <h2 style="color: #7aa2f7; font-size: 20px;">Writers Reference is Empty</h2>
+                <p style="font-size: 13.5px; line-height: 1.6; max-width: 520px; margin: 12px auto 0 auto;">
+                    No reference topics are currently bundled. To add knowledge topics, run the standalone <b>Reference Builder Tool</b> (<code>tools/reference_builder.py</code>) to curate topics for your offline library.
+                </p>
+            </div>
+            """
+        else:
+            html = """
+            <div style="text-align: center; padding-top: 80px; color: #8c91b0;">
+                <h2 style="color: #7aa2f7; font-size: 20px;">No Matching Topics Found</h2>
+                <p style="font-size: 13px;">Try searching with broader terms or clearing active filters.</p>
+            </div>
+            """
         self.text_browser.setHtml(html)
-        self.btn_edit_entry.setEnabled(False)
-        self.btn_delete_entry.setEnabled(False)
 
     def _render_entry_detail(self, entry: ReferenceEntry) -> None:
-        self.btn_edit_entry.setEnabled(True)
-        self.btn_delete_entry.setEnabled(entry.is_custom)
 
         badge_bg = "#232532" if not entry.is_custom else "#1e293b"
         badge_text = "#7aa2f7" if not entry.is_custom else "#38bdf8"
@@ -685,41 +664,3 @@ class WritersReferenceDialog(QDialog):
         self.btn_copy_facts.setText("✓ Copied to Clipboard!")
         from PySide6.QtCore import QTimer
         QTimer.singleShot(1800, lambda: self.btn_copy_facts.setText(orig_text))
-
-    def _open_add_entry_dialog(self) -> None:
-        dlg = ReferenceEntryEditorDialog(entry=None, parent=self)
-        dlg.entrySaved.connect(self._on_custom_entry_saved)
-        dlg.exec()
-
-    def _edit_current_entry(self) -> None:
-        if not self._current_entry:
-            return
-        dlg = ReferenceEntryEditorDialog(entry=self._current_entry, parent=self)
-        dlg.entrySaved.connect(self._on_custom_entry_saved)
-        dlg.exec()
-
-    def _delete_current_entry(self) -> None:
-        if not self._current_entry or not self._current_entry.is_custom:
-            return
-        res = QMessageBox.question(
-            self, "Confirm Delete",
-            f"Are you sure you want to delete custom topic '{self._current_entry.title}'?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if res == QMessageBox.StandardButton.Yes:
-            self.manager.delete_entry(self._current_entry.id)
-            self._refresh_results()
-
-    def _on_custom_entry_saved(self, entry: ReferenceEntry) -> None:
-        self.manager.add_or_update_entry(entry)
-        self._refresh_results()
-        # Select the newly saved entry
-        for i in range(self.list_results.count()):
-            item = self.list_results.item(i)
-            if item.data(Qt.ItemDataRole.UserRole) == entry.id:
-                self.list_results.setCurrentItem(item)
-                break
-
-    def _open_manager_studio(self) -> None:
-        self.studio_win = ReferenceBuilderWindow(manager=self.manager)
-        self.studio_win.show()

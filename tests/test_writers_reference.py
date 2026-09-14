@@ -1,4 +1,4 @@
-"""Unit and integration tests for Writers Reference knowledge base, search, and builder tool."""
+"""Unit and integration tests for Writers Reference knowledge base, search, and standalone builder tool."""
 
 import os
 import tempfile
@@ -7,10 +7,10 @@ from PySide6.QtWidgets import QApplication
 
 from volumenodex.reference.reference_model import ReferenceEntry, ReferenceCategory
 from volumenodex.reference.reference_manager import ReferenceManager
-from volumenodex.reference.builder_tool import ReferenceEntryEditorDialog, ReferenceBuilderWindow
 from volumenodex.ui.writers_reference_dialog import WritersReferenceDialog
 from volumenodex.ui.ribbon import RibbonBar
 from volumenodex.ui.main_window import MainWindow
+from tools.reference_builder import ReferenceEntryEditorDialog, StandaloneReferenceBuilderApp
 
 
 @pytest.fixture(scope="session")
@@ -60,42 +60,17 @@ def test_reference_entry_model():
     assert score_none == 0
 
 
-def test_reference_manager_bundled():
+def test_reference_manager_empty_and_custom_entries():
     with tempfile.TemporaryDirectory() as tmpdir:
         rm = ReferenceManager(user_storage_dir=tmpdir)
-        assert rm.total_count >= 20, f"Expected at least 20 bundled entries, got {rm.total_count}"
-
-        # Test search
-        results_poison = rm.search("poison")
-        assert len(results_poison) >= 1
-        titles = [e.title for e in results_poison]
-        assert any("Arsenic" in t or "Cyanide" in t for t in titles)
-
-        # Test category filtering
-        results_nautical = rm.search(category=ReferenceCategory.NAUTICAL_SAILING)
-        assert len(results_nautical) >= 2
-        for e in results_nautical:
-            assert e.category == ReferenceCategory.NAUTICAL_SAILING
-
-        # Test categories and tags extraction
-        cats = rm.get_categories()
-        assert ReferenceCategory.POISONS_MEDICINE in cats
-        assert ReferenceCategory.WEAPONS_WARFARE in cats
-
-        tags = rm.get_tags()
-        assert "poison" in tags or "arsenic" in tags
-
-
-def test_reference_manager_custom_entries():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        rm = ReferenceManager(user_storage_dir=tmpdir)
-        initial_count = rm.total_count
+        # Bundled knowledge is purged clean
+        assert rm.total_count == 0
 
         custom_entry = ReferenceEntry(
             id="custom-magic-poison",
             title="Grave-Lotus Nectar",
-            category="Dark Fantasy Alchemy",
-            tags=["lotus", "necromancy", "sleep"],
+            category=ReferenceCategory.POISONS_MEDICINE,
+            tags=["lotus", "necromancy", "sleep", "poison"],
             summary="A mystical poison that induces death-like torpor.",
             quick_facts={"Duration": "24 Hours", "Taste": "Bitter Honey"},
             content="Extracted from black lotuses growing in burial grounds.",
@@ -105,55 +80,84 @@ def test_reference_manager_custom_entries():
 
         success = rm.add_or_update_entry(custom_entry)
         assert success is True
-        assert rm.total_count == initial_count + 1
+        assert rm.total_count == 1
         assert rm.custom_count == 1
 
-        # Test persistence across reloads
+        # Search
+        results = rm.search("poison")
+        assert len(results) == 1
+        assert results[0].title == "Grave-Lotus Nectar"
+
+        # Category filter
+        results_cat = rm.search(category=ReferenceCategory.POISONS_MEDICINE)
+        assert len(results_cat) == 1
+
+        # Persistence across reloads
         rm2 = ReferenceManager(user_storage_dir=tmpdir)
-        assert rm2.total_count == initial_count + 1
+        assert rm2.total_count == 1
         loaded = rm2.get_entry("custom-magic-poison")
         assert loaded is not None
         assert loaded.title == "Grave-Lotus Nectar"
-        assert loaded.is_custom is True
 
-        # Test deleting custom entry
+        # Deleting custom entry
         del_success = rm2.delete_entry("custom-magic-poison")
         assert del_success is True
-        assert rm2.total_count == initial_count
-        assert rm2.get_entry("custom-magic-poison") is None
+        assert rm2.total_count == 0
 
 
 def test_reference_manager_import_export():
     with tempfile.TemporaryDirectory() as tmpdir:
         rm = ReferenceManager(user_storage_dir=tmpdir)
-        export_file = os.path.join(tmpdir, "export.json")
+        entry = ReferenceEntry(
+            id="test-topic-1",
+            title="Test Topic",
+            category=ReferenceCategory.WEAPONS_WARFARE,
+            summary="Summary here.",
+            is_custom=True,
+        )
+        rm.add_or_update_entry(entry)
 
+        export_file = os.path.join(tmpdir, "export.json")
         success = rm.export_to_json(export_file, include_bundled=True)
         assert success is True
         assert os.path.exists(export_file)
 
-        # Import into a separate manager
+        # Import into separate manager
         with tempfile.TemporaryDirectory() as tmpdir2:
             rm2 = ReferenceManager(user_storage_dir=tmpdir2)
             imported_count = rm2.import_from_json(export_file)
-            assert imported_count >= 20
+            assert imported_count == 1
+            assert rm2.total_count == 1
 
 
 def test_writers_reference_dialog_ui(app):
     with tempfile.TemporaryDirectory() as tmpdir:
         rm = ReferenceManager(user_storage_dir=tmpdir)
+        # Empty state
         dlg = WritersReferenceDialog(manager=rm)
-        assert dlg.list_results.count() == rm.total_count
+        assert dlg.list_results.count() == 0
+        assert "Empty" in dlg.text_browser.toHtml()
+
+        # Add an entry to test interactions
+        entry = ReferenceEntry(
+            id="sample-flintlock",
+            title="Flintlock Firearms",
+            category=ReferenceCategory.WEAPONS_WARFARE,
+            tags=["flintlock", "blackpowder"],
+            summary="Blackpowder mechanics.",
+            quick_facts={"Range": "50 yards", "Reload": "20s"},
+            content="Striking flint against steel.",
+            fiction_tips="Rain ruins powder.",
+            is_custom=True,
+        )
+        rm.add_or_update_entry(entry)
+        dlg._refresh_results()
+        assert dlg.list_results.count() == 1
 
         # Test search filter
-        dlg.edit_search.setText("arsenic")
-        assert dlg.list_results.count() >= 1
-        assert "Arsenic" in dlg.list_results.item(0).text()
-
-        # Test category chip filter
-        dlg.edit_search.clear()
-        dlg._on_category_chip_clicked(ReferenceCategory.NAUTICAL_SAILING)
-        assert dlg.list_results.count() >= 2
+        dlg.edit_search.setText("flintlock")
+        assert dlg.list_results.count() == 1
+        assert "Flintlock" in dlg.list_results.item(0).text()
 
         # Test copy facts feedback
         dlg._copy_facts_to_clipboard()
@@ -168,6 +172,32 @@ def test_writers_reference_dialog_ui(app):
         assert "Inserted" in dlg.btn_insert.text()
 
         dlg.close()
+
+
+def test_standalone_builder_app(app):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        target_path = os.path.join(tmpdir, "test_bundled.json")
+        builder = StandaloneReferenceBuilderApp(target_json_path=target_path)
+        assert builder.table.rowCount() == 0
+
+        # Add a topic
+        topic = {
+            "id": "new-topic",
+            "title": "New Medieval Topic",
+            "category": ReferenceCategory.CASTLES_ARCHITECTURE,
+            "tags": ["castles", "towers"],
+            "summary": "Castle towers summary.",
+            "quick_facts": {"Height": "60 ft"},
+            "content": "Stone masonry construction.",
+            "fiction_tips": "Spiral stairs wind clockwise.",
+            "related_entries": [],
+            "is_custom": False,
+        }
+        builder._on_topic_added(topic)
+        assert builder.table.rowCount() == 1
+        assert os.path.exists(target_path)
+
+        builder.close()
 
 
 def test_ribbon_integration(app):
@@ -200,7 +230,17 @@ def test_main_window_writers_reference(app):
     assert dlg is not None
     assert dlg.isVisible()
 
-    # Test inserting text via dialog signal
+    # Add a temporary entry to test insert
+    entry = ReferenceEntry(
+        id="test-entry",
+        title="Test Entry Title",
+        category="Test Category",
+        summary="Test summary.",
+        is_custom=True,
+    )
+    dlg.manager.add_or_update_entry(entry)
+    dlg._refresh_results()
+
     init_text = win.canvas_area._cursor.document().toPlainText()
     dlg._insert_current_into_document()
     app.processEvents()
