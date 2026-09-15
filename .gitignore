@@ -18,6 +18,11 @@ wheels/
 *.spec
 !Volumenodex.spec
 
+# Internal developer tools
+tools/
+Launch_Reference_Builder.bat
+run_reference_builder.bat
+
 # Logs & Runtime
 *.log
 launch.log

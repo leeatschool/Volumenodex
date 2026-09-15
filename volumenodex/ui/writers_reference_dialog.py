@@ -1,5 +1,6 @@
 """Writers Reference pop-up window: offline compendium of human knowledge for fiction authors."""
 
+import html
 import os
 import shutil
 from pathlib import Path
@@ -47,10 +48,10 @@ class WritersReferenceDialog(QDialog):
     def _discover_logo_path(self) -> Optional[str]:
         """Looks for the Writers Reference logo in standard locations."""
         candidates = [
+            os.path.join(str(Path.home()), ".volumenodex", "resources", "writers_reference_logo.png"),
             os.path.join(os.path.dirname(__file__), "..", "resources", "writers_reference_logo.png"),
             os.path.join(os.path.dirname(__file__), "..", "..", "assets", "writers_reference_logo.png"),
             os.path.join(os.path.dirname(__file__), "..", "..", "assets", "writref.png"),
-            r"C:\Users\thele\Downloads\writref.png",
             os.path.join(str(Path.home()), "Downloads", "writref.png"),
             os.path.join(str(Path.home()), "Downloads", "writers_reference_logo.png"),
             os.path.join(os.path.dirname(__file__), "..", "resources", "writers_reference_logo.jpg"),
@@ -338,11 +339,6 @@ class WritersReferenceDialog(QDialog):
         self.btn_refresh.setToolTip("Reload knowledge base from disk")
         self.btn_refresh.clicked.connect(self._reload_and_refresh)
         h_actions.addWidget(self.btn_refresh)
-
-        self.btn_builder = QPushButton("⚡ Launch Knowledge Builder")
-        self.btn_builder.setToolTip("Open the external Knowledge Builder and PDF Ingestor")
-        self.btn_builder.clicked.connect(self._launch_external_builder)
-        h_actions.addWidget(self.btn_builder)
         v_right.addLayout(h_actions)
 
         # Reader Browser
@@ -434,14 +430,21 @@ class WritersReferenceDialog(QDialog):
 
     def set_custom_logo(self, path: str) -> bool:
         """Sets and copies a user-provided logo image for the Writers Reference."""
-        if not os.path.exists(path):
+        if not path or not isinstance(path, str):
+            return False
+        clean_path = path.strip()
+        # Reject UNC / network shares and URLs to prevent credential coercion
+        if clean_path.startswith(("\\\\", "//")) or "://" in clean_path:
+            return False
+        if not os.path.exists(clean_path) or not os.path.isfile(clean_path):
             return False
 
         try:
-            target_dir = os.path.join(os.path.dirname(__file__), "..", "resources")
+            # Store in user config dir ~/.volumenodex/resources to avoid writing to Program Files
+            target_dir = os.path.join(str(Path.home()), ".volumenodex", "resources")
             os.makedirs(target_dir, exist_ok=True)
             target_path = os.path.join(target_dir, "writers_reference_logo.png")
-            shutil.copyfile(path, target_path)
+            shutil.copyfile(clean_path, target_path)
             self._custom_logo_path = target_path
             self._render_logo()
             return True
@@ -530,7 +533,7 @@ class WritersReferenceDialog(QDialog):
             <div style="text-align: center; padding-top: 80px; color: #8c91b0;">
                 <h2 style="color: #7aa2f7; font-size: 20px;">Writers Reference is Empty</h2>
                 <p style="font-size: 13.5px; line-height: 1.6; max-width: 520px; margin: 12px auto 0 auto;">
-                    No reference topics are currently bundled. To add knowledge topics, run the standalone <b>Reference Builder Tool</b> (<code>tools/reference_builder.py</code>) to curate topics for your offline library.
+                    No reference topics are currently installed in the offline knowledge compendium.
                 </p>
             </div>
             """
@@ -549,8 +552,13 @@ class WritersReferenceDialog(QDialog):
         badge_text = "#7aa2f7" if not entry.is_custom else "#38bdf8"
         source_label = "Verified Core Knowledge" if not entry.is_custom else "Personal Custom Lore"
 
+        escaped_title = html.escape(entry.title)
+        escaped_category = html.escape(entry.category)
+        escaped_summary = html.escape(entry.summary)
+        escaped_fiction_tips = html.escape(entry.fiction_tips)
+
         tags_html = "".join(
-            f"<span style='background-color: #1e202c; color: #a2a7c4; padding: 2px 8px; border-radius: 10px; font-size: 11px; margin-right: 4px;'>#{t}</span>"
+            f"<span style='background-color: #1e202c; color: #a2a7c4; padding: 2px 8px; border-radius: 10px; font-size: 11px; margin-right: 4px;'>#{html.escape(str(t))}</span>"
             for t in entry.tags
         )
 
@@ -560,8 +568,8 @@ class WritersReferenceDialog(QDialog):
             for k, v in entry.quick_facts.items():
                 rows_html += f"""
                 <tr>
-                    <td style="padding: 6px 10px; font-weight: 600; color: #7aa2f7; border-bottom: 1px solid #1f212e; width: 32%;">{k}</td>
-                    <td style="padding: 6px 10px; color: #f1f3fa; border-bottom: 1px solid #1f212e;">{v}</td>
+                    <td style="padding: 6px 10px; font-weight: 600; color: #7aa2f7; border-bottom: 1px solid #1f212e; width: 32%;">{html.escape(str(k))}</td>
+                    <td style="padding: 6px 10px; color: #f1f3fa; border-bottom: 1px solid #1f212e;">{html.escape(str(v))}</td>
                 </tr>
                 """
             facts_table_html = f"""
@@ -583,7 +591,7 @@ class WritersReferenceDialog(QDialog):
                     💡 Fiction Writer's Reality Guide & Tropes to Avoid
                 </div>
                 <div style="color: #e1e4f2; font-size: 13px; line-height: 1.5;">
-                    {entry.fiction_tips}
+                    {escaped_fiction_tips}
                 </div>
             </div>
             """
@@ -594,7 +602,7 @@ class WritersReferenceDialog(QDialog):
             for rel_id in entry.related_entries:
                 rel_entry = self.manager.get_entry(rel_id)
                 if rel_entry:
-                    links.append(f"<a href='topic:{rel_id}' style='color: #7aa2f7; text-decoration: none; font-weight: 600;'>{rel_entry.title}</a>")
+                    links.append(f"<a href='topic:{rel_id}' style='color: #7aa2f7; text-decoration: none; font-weight: 600;'>{html.escape(rel_entry.title)}</a>")
             if links:
                 related_html = f"""
                 <div style="margin-top: 20px; padding-top: 12px; border-top: 1px solid #1f212e; font-size: 12px; color: #8c91b0;">
@@ -602,22 +610,25 @@ class WritersReferenceDialog(QDialog):
                 </div>
                 """
 
-        # Format main paragraphs
+        # Format main paragraphs (escape if custom entry to prevent HTML injection)
         paragraphs = entry.content.split("\n\n")
-        body_html = "".join(f"<p style='margin-bottom: 12px; line-height: 1.6;'>{p.replace(chr(10), '<br>')}</p>" for p in paragraphs if p.strip())
+        if entry.is_custom:
+            body_html = "".join(f"<p style='margin-bottom: 12px; line-height: 1.6;'>{html.escape(p).replace(chr(10), '<br>')}</p>" for p in paragraphs if p.strip())
+        else:
+            body_html = "".join(f"<p style='margin-bottom: 12px; line-height: 1.6;'>{p.replace(chr(10), '<br>')}</p>" for p in paragraphs if p.strip())
 
-        html = f"""
+        html_out = f"""
         <div style="font-family: 'Segoe UI', sans-serif; color: #e1e4f2;">
             <div style="display: flex; justify-content: space-between; align-items: baseline;">
                 <span style="background-color: {badge_bg}; color: {badge_text}; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 4px; text-transform: uppercase;">
-                    {entry.category} • {source_label}
+                    {escaped_category} • {source_label}
                 </span>
             </div>
-            <h1 style="font-size: 22px; font-weight: 800; color: #ffffff; margin: 10px 0 6px 0;">{entry.title}</h1>
+            <h1 style="font-size: 22px; font-weight: 800; color: #ffffff; margin: 10px 0 6px 0;">{escaped_title}</h1>
             <div style="margin-bottom: 12px;">{tags_html}</div>
 
             <div style="font-size: 14px; font-weight: 500; color: #c0caf5; margin-bottom: 16px; border-left: 3px solid #7aa2f7; padding-left: 10px; line-height: 1.5;">
-                {entry.summary}
+                {escaped_summary}
             </div>
 
             {facts_table_html}
@@ -631,7 +642,7 @@ class WritersReferenceDialog(QDialog):
             {related_html}
         </div>
         """
-        self.text_browser.setHtml(html)
+        self.text_browser.setHtml(html_out)
 
     def _on_anchor_clicked(self, url) -> None:
         scheme = url.scheme()
@@ -700,23 +711,6 @@ class WritersReferenceDialog(QDialog):
         self.btn_copy_facts.setText("✓ Copied to Clipboard!")
         from PySide6.QtCore import QTimer
         QTimer.singleShot(1800, lambda: self.btn_copy_facts.setText(orig_text))
-
-    def _launch_external_builder(self) -> None:
-        """Launches the external Standalone Writers Reference Builder as an independent process."""
-        import sys
-        import subprocess
-        from pathlib import Path
-        repo_root = Path(__file__).resolve().parent.parent.parent
-        builder_script = repo_root / "tools" / "reference_builder.py"
-        py_exe = sys.executable
-        if os.name == "nt" and py_exe.lower().endswith("python.exe"):
-            pyw = py_exe[:-10] + "pythonw.exe"
-            if os.path.exists(pyw):
-                py_exe = pyw
-        try:
-            subprocess.Popen([py_exe, str(builder_script)], cwd=str(repo_root))
-        except Exception as e:
-            QMessageBox.warning(self, "Launch Error", f"Could not launch Knowledge Builder:\n{e}")
 
     def _reload_and_refresh(self) -> None:
         """Reloads knowledge base from disk and updates current results view."""

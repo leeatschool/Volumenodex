@@ -39,7 +39,10 @@ class AudioEngine(QObject):
         super().__init__(parent)
         self.base_dir = self._resolve_base_dir(base_dir)
         self.sounds_dir = os.path.join(self.base_dir, "assets", "sounds")
-        os.makedirs(self.sounds_dir, exist_ok=True)
+        try:
+            os.makedirs(self.sounds_dir, exist_ok=True)
+        except OSError:
+            pass
 
         self._effects_volume = 0.5
         self._ambient_volume = 0.35

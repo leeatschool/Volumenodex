@@ -56,15 +56,26 @@ class IndexCard:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "IndexCard":
+        status_val = data.get("status", CardStatus.DRAFT.value)
+        try:
+            card_status = CardStatus(status_val)
+        except ValueError:
+            card_status = CardStatus.DRAFT
+
+        try:
+            wc = int(data.get("word_count", 0))
+        except (ValueError, TypeError):
+            wc = 0
+
         return cls(
-            id=data.get("id", str(uuid.uuid4())[:8]),
-            title=data.get("title", "Untitled"),
-            synopsis=data.get("synopsis", ""),
-            status=CardStatus(data.get("status", CardStatus.DRAFT.value)),
-            bg_color=data.get("bg_color", "#fff9db"),
-            text_color=data.get("text_color", "#2b2616"),
-            word_count=data.get("word_count", 0),
-            is_linked=data.get("is_linked", True),
+            id=str(data.get("id", str(uuid.uuid4())[:8])),
+            title=str(data.get("title", "Untitled")),
+            synopsis=str(data.get("synopsis", "")),
+            status=card_status,
+            bg_color=str(data.get("bg_color", "#fff9db")),
+            text_color=str(data.get("text_color", "#2b2616")),
+            word_count=wc,
+            is_linked=bool(data.get("is_linked", True)),
         )
 
 

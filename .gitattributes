@@ -1,0 +1,8 @@
+# Export-ignore rules for Git release archives
+tools/ export-ignore
+Launch_Reference_Builder.bat export-ignore
+run_reference_builder.bat export-ignore
+tests/ export-ignore
+.gitignore export-ignore
+.gitattributes export-ignore
+.pytest_cache/ export-ignore

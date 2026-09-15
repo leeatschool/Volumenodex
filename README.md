@@ -42,10 +42,10 @@
 * **Ambient Soundscapes**: Library rain, coffeehouse hearth, midnight wind, forest stream.
 * **Corvus the Raven (Writing Pet)**: Non-intrusive desktop companion dock offering editorial insight, sprint tracking, and break reminders.
 
-### 7. Offline Writer's Reference & Knowledge Builder
+### 7. Offline Writer's Reference Compendium
 * **Curated Reference Encyclopedia**: Over 260 encyclopedic articles across 12 disciplines (Aviation, Nautical, Survival, Poisons & Medicine, Warfare, Storytelling, and more) accessible directly inside the editor without an internet connection.
-* **Automated PDF Ingestion Tool**: Convert research PDFs into formatted reference entries with smart paragraph reflowing and typographic cleanup (`Launch_Reference_Builder.bat`).
 * **Instant In-Text Insertion**: One-click copying and direct insertion of reference points, technical nomenclature, and historical details directly into your manuscript.
+* **Personal Custom Lore**: Seamlessly extend the offline encyclopedia with your own custom worldbuilding dossiers, notes, and quick-fact properties.
 
 ---
 
@@ -95,6 +95,6 @@ pyinstaller Volumenodex.spec
 
 ## 📄 License & Status
 
-**Version**: `v.Alpha.0.0.2`  
-**Status**: Private Alpha Development Build  
+**Version**: `1.0.0`  
+**Status**: Production Release  
 Copyright © 2026. All rights reserved.

@@ -1,5 +1,6 @@
 """Main application window for Volumenodex Word Processing Studio."""
 
+import html
 import os
 from datetime import datetime
 from typing import Optional
@@ -1051,11 +1052,11 @@ class MainWindow(QMainWindow):
         """Reconstructs the manuscript document matching the card sequence."""
         html_parts = []
         for card in cards:
-            html_parts.append(f"<h2>{card.title}</h2>")
+            html_parts.append(f"<h2>{html.escape(card.title)}</h2>")
             paragraphs = card.section_text.split("\n")
             for p in paragraphs:
                 if p.strip():
-                    html_parts.append(f"<p>{p.strip()}</p>")
+                    html_parts.append(f"<p>{html.escape(p.strip())}</p>")
         self.editor.setHtml("".join(html_parts))
         self._update_metrics()
 
@@ -1374,21 +1375,24 @@ class MainWindow(QMainWindow):
         self.current_file_path = path
         self.story_metadata = meta or {}
         if meta:
-            self.codex_manager.from_dict(meta)
-            self.right_codex.refresh()
-            if "citations" in meta and isinstance(meta["citations"], list):
-                self.citation_manager.from_dict(meta["citations"])
-                if "citation_style" in meta:
-                    self.citation_manager.active_style = meta["citation_style"]
-                self.citation_drawer.refresh()
-            if "document_mode" in meta:
-                try:
-                    mode = DocumentMode(meta["document_mode"])
-                    self.set_document_mode(mode)
-                except ValueError:
+            try:
+                self.codex_manager.from_dict(meta)
+                self.right_codex.refresh()
+                if "citations" in meta and isinstance(meta["citations"], list):
+                    self.citation_manager.from_dict(meta["citations"])
+                    if "citation_style" in meta:
+                        self.citation_manager.active_style = meta["citation_style"]
+                    self.citation_drawer.refresh()
+                if "document_mode" in meta:
+                    try:
+                        mode = DocumentMode(meta["document_mode"])
+                        self.set_document_mode(mode)
+                    except ValueError:
+                        self.set_document_mode(DocumentMode.CREATIVE_FICTION)
+                else:
                     self.set_document_mode(DocumentMode.CREATIVE_FICTION)
-            else:
-                self.set_document_mode(DocumentMode.CREATIVE_FICTION)
+            except Exception as e:
+                print(f"Warning: Companion metadata corrupted or partially invalid: {e}")
         self.spell_engine.sync_story_codex_whitelist(self.codex_manager)
         self.left_navigator.scan_manuscript(self.canvas_area.document())
         self._check_live_mentions()

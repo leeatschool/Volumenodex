@@ -10,7 +10,6 @@ from volumenodex.reference.reference_manager import ReferenceManager
 from volumenodex.ui.writers_reference_dialog import WritersReferenceDialog
 from volumenodex.ui.ribbon import RibbonBar
 from volumenodex.ui.main_window import MainWindow
-from tools.reference_builder import ReferenceEntryEditorDialog, StandaloneReferenceBuilderApp
 
 
 @pytest.fixture(scope="session")
@@ -185,32 +184,6 @@ def test_writers_reference_dialog_ui(app):
         assert "Inserted" in dlg.btn_insert.text()
 
         dlg.close()
-
-
-def test_standalone_builder_app(app):
-    with tempfile.TemporaryDirectory() as tmpdir:
-        target_path = os.path.join(tmpdir, "test_bundled.json")
-        builder = StandaloneReferenceBuilderApp(target_json_path=target_path)
-        assert builder.table.rowCount() == 0
-
-        # Add a topic
-        topic = {
-            "id": "new-topic",
-            "title": "New Medieval Topic",
-            "category": ReferenceCategory.CASTLES_ARCHITECTURE,
-            "tags": ["castles", "towers"],
-            "summary": "Castle towers summary.",
-            "quick_facts": {"Height": "60 ft"},
-            "content": "Stone masonry construction.",
-            "fiction_tips": "Spiral stairs wind clockwise.",
-            "related_entries": [],
-            "is_custom": False,
-        }
-        builder._on_topic_added(topic)
-        assert builder.table.rowCount() == 1
-        assert os.path.exists(target_path)
-
-        builder.close()
 
 
 def test_ribbon_integration(app):

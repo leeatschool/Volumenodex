@@ -7,7 +7,7 @@ directional navigation, and single or atomic batch replacements with undo suppor
 
 import re
 from typing import List, Tuple, Optional
-from PySide6.QtCore import Qt, Signal, QSize, QRect
+from PySide6.QtCore import Qt, Signal, QSize, QRect, QTimer
 from PySide6.QtGui import QColor, QFont, QTextCursor
 from PySide6.QtWidgets import (
     QFrame, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
@@ -33,6 +33,11 @@ class FindReplaceBar(QFrame):
 
         self.matches: List[Tuple[int, int]] = []
         self.current_match_idx: int = -1
+
+        # Search debounce timer to prevent UI thread freezing on rapid typing
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.timeout.connect(lambda: self.run_search(keep_index=False))
 
         self._init_ui()
         self._apply_styling()
@@ -290,7 +295,7 @@ class FindReplaceBar(QFrame):
 
     def _on_search_text_changed(self) -> None:
         self.lbl_replace_status.setText("")
-        self.run_search(keep_index=False)
+        self._search_timer.start(80)
 
     def _on_option_toggled(self) -> None:
         self.run_search(keep_index=True)
@@ -307,6 +312,15 @@ class FindReplaceBar(QFrame):
             self.matches = []
             self.current_match_idx = -1
             self.lbl_count.setText("")
+            if self.canvas:
+                self.canvas.clear_search_matches()
+            return
+
+        if len(query) > 2000:
+            self.matches = []
+            self.current_match_idx = -1
+            self.lbl_count.setText("Query too long")
+            self.lbl_count.setStyleSheet("color: #f7768e; font-size: 10px; font-weight: 600;")
             if self.canvas:
                 self.canvas.clear_search_matches()
             return
@@ -334,7 +348,22 @@ class FindReplaceBar(QFrame):
                 pat_str = rf"\b{pat_str}\b"
             pattern = re.compile(pat_str, flags)
 
-        self.matches = [(m.start(), m.end()) for m in pattern.finditer(text)]
+        found_matches = []
+        try:
+            for m in pattern.finditer(text):
+                found_matches.append((m.start(), m.end()))
+                if len(found_matches) >= 10000:
+                    break
+        except Exception:
+            self.matches = []
+            self.current_match_idx = -1
+            self.lbl_count.setText("Search Error")
+            self.lbl_count.setStyleSheet("color: #f7768e; font-size: 10px; font-weight: 600;")
+            if self.canvas:
+                self.canvas.clear_search_matches()
+            return
+
+        self.matches = found_matches
 
         if not self.matches:
             self.current_match_idx = -1
@@ -373,6 +402,9 @@ class FindReplaceBar(QFrame):
 
     def find_next(self) -> None:
         """Cycles forward to the next match."""
+        if hasattr(self, "_search_timer") and self._search_timer.isActive():
+            self._search_timer.stop()
+            self.run_search(keep_index=True)
         if not self.matches:
             return
         self.current_match_idx = (self.current_match_idx + 1) % len(self.matches)
@@ -381,6 +413,9 @@ class FindReplaceBar(QFrame):
 
     def find_prev(self) -> None:
         """Cycles backward to the previous match."""
+        if hasattr(self, "_search_timer") and self._search_timer.isActive():
+            self._search_timer.stop()
+            self.run_search(keep_index=True)
         if not self.matches:
             return
         self.current_match_idx = (self.current_match_idx - 1 + len(self.matches)) % len(self.matches)

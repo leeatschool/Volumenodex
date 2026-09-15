@@ -9,7 +9,6 @@ a = Analysis(
         ('assets', 'assets'),
         ('volumenodex/reference/bundled_knowledge.json', 'volumenodex/reference'),
         ('volumenodex/resources', 'volumenodex/resources'),
-        ('tools', 'tools'),
     ],
     hiddenimports=[],
     hookspath=[],

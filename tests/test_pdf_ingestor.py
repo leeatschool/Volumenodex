@@ -175,52 +175,6 @@ def test_incorporate_entries():
         assert total2 == 3
 
 
-def test_pdf_ingestion_dialog_ui(monkeypatch):
-    from tools.reference_builder import PDFIngestionDialog, StandaloneReferenceBuilderApp
-    from PySide6.QtWidgets import QApplication, QMessageBox
-    app = QApplication.instance() or QApplication([])
-
-    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: QMessageBox.StandardButton.Ok)
-    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **kwargs: QMessageBox.StandardButton.Ok)
-    monkeypatch.setattr(QMessageBox, "critical", lambda *args, **kwargs: QMessageBox.StandardButton.Ok)
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        pdf_path = os.path.join(tmpdir, "sample.pdf")
-        create_sample_pdf(pdf_path)
-
-        target_json = os.path.join(tmpdir, "library.json")
-        builder = StandaloneReferenceBuilderApp(target_json_path=target_json)
-
-        # Dialog UI verification
-        dlg = PDFIngestionDialog(target_json_path=target_json, parent=builder)
-        assert dlg.isVisible() is False
-        dlg.edit_pdf_path.setText(pdf_path)
-
-        # Triggers inspection and banner update
-        assert "Bookmarks" in dlg.lbl_doc_info.text() or "Pages: 4" in dlg.lbl_doc_info.text()
-
-        # Run extraction through UI
-        dlg._start_extraction()
-        assert len(dlg._extracted_entries) == 3
-        assert dlg.table_preview.rowCount() == 3
-
-        # Test preview filtering
-        dlg.edit_filter.setText("Rigging")
-        assert dlg.table_preview.rowCount() == 1
-        dlg.edit_filter.clear()
-        assert dlg.table_preview.rowCount() == 3
-
-        # Test commit
-        dlg._commit_entries()
-        assert os.path.exists(target_json)
-        with open(target_json, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        assert len(data) == 3
-
-        dlg.close()
-        builder.close()
-
-
 def test_pdf_articleifier_reflow_and_sentence_case():
     with tempfile.TemporaryDirectory() as tmpdir:
         pdf_path = os.path.join(tmpdir, "broken_caps.pdf")

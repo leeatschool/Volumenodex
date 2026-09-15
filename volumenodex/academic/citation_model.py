@@ -7,6 +7,7 @@ with instant in-text citation injection and complete bibliography generation.
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from typing import List, Dict, Optional, Any
+import html
 import uuid
 import re
 
@@ -82,7 +83,8 @@ class CitationEntry:
                 d["entry_type"] = CitationType(d["entry_type"])
             except ValueError:
                 d["entry_type"] = CitationType.JOURNAL
-        return cls(**d)
+        valid_fields = {k: v for k, v in d.items() if k in cls.__dataclass_fields__}
+        return cls(**valid_fields)
 
 
 class CitationFormatter:
@@ -170,22 +172,24 @@ class CitationFormatter:
     @classmethod
     def format_bibliography_entry(cls, entry: CitationEntry, style: str = "APA 7th", index: int = 1) -> str:
         authors_raw = entry.authors
-        parsed = [cls._parse_author_name(a) for a in authors_raw] if authors_raw else [("Anonymous", "")]
-        year = entry.year or "n.d."
-        title = entry.title.rstrip(".") if entry.title else "Untitled Work"
-        source = entry.source_title.rstrip(".") if entry.source_title else ""
-        vol = entry.volume.strip()
-        issue = entry.issue.strip()
-        pages = entry.pages.strip()
-        publisher = entry.publisher.strip()
+        parsed_raw = [cls._parse_author_name(a) for a in authors_raw] if authors_raw else [("Anonymous", "")]
+        parsed = [(html.escape(last), html.escape(first)) for last, first in parsed_raw]
+        year = html.escape(entry.year or "n.d.")
+        title = html.escape(entry.title.rstrip(".") if entry.title else "Untitled Work")
+        source = html.escape(entry.source_title.rstrip(".") if entry.source_title else "")
+        vol = html.escape(entry.volume.strip())
+        issue = html.escape(entry.issue.strip())
+        pages = html.escape(entry.pages.strip())
+        publisher = html.escape(entry.publisher.strip())
         doi = entry.doi.strip()
         url = entry.url.strip()
 
         doi_or_url = ""
         if doi:
-            doi_or_url = f"https://doi.org/{doi}" if not doi.startswith("http") else doi
+            doi_raw = f"https://doi.org/{doi}" if not doi.startswith("http") else doi
+            doi_or_url = html.escape(doi_raw)
         elif url:
-            doi_or_url = url
+            doi_or_url = html.escape(url)
 
         if style == "APA 7th":
             # Authors: Last, F. M., & Last, F. M.

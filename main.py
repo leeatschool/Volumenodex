@@ -49,7 +49,6 @@ def main():
     icon_candidates = [
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icon.png"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "volumenodex", "resources", "app_icon.png"),
-        r"C:\Users\thele\Downloads\WHCP.png",
     ]
     for p in icon_candidates:
         if os.path.exists(p):

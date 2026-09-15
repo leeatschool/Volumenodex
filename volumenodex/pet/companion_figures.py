@@ -4,6 +4,7 @@ Renders crisp, resolution-independent portraits for each companion without relyi
 on unicode emojis that can fail or elide on various Windows font configurations.
 """
 
+import os
 from typing import Optional
 from PySide6.QtCore import Qt, QRectF, QPointF
 from PySide6.QtGui import (
@@ -70,7 +71,16 @@ class CompanionFigureRenderer:
 
     @classmethod
     def _render_custom_image(cls, path: str, size: int) -> Optional[QPixmap]:
-        src = QPixmap(path)
+        if not path or not isinstance(path, str):
+            return None
+        clean_path = path.strip()
+        # Disallow UNC / network share paths and URI schemes to prevent NTLM coercion or SSRF
+        if clean_path.startswith(("\\\\", "//")) or "://" in clean_path:
+            return None
+        if not os.path.exists(clean_path) or not os.path.isfile(clean_path):
+            return None
+
+        src = QPixmap(clean_path)
         if src.isNull():
             return None
         target = QPixmap(size, size)

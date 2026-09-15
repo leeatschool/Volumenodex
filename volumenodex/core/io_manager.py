@@ -1,7 +1,9 @@
 """Document import, export, and companion story metadata serialization."""
 
+import html
 import json
 import os
+import zipfile
 from typing import Optional, Dict, Any
 import docx
 from docx.shared import Inches, Pt, RGBColor
@@ -170,16 +172,32 @@ class IOManager:
     def load_docx(file_path: str, qdoc: QTextDocument) -> Optional[Dict[str, Any]]:
         """Loads a .docx file into QTextDocument and loads companion story metadata if present."""
         try:
+            # Enforce archive size limits and validate zip structure to prevent zip bombs
+            if zipfile.is_zipfile(file_path):
+                with zipfile.ZipFile(file_path, "r") as zf:
+                    total_uncompressed = 0
+                    for info in zf.infolist():
+                        if ".." in info.filename or info.filename.startswith(("/", "\\")):
+                            print("Security Warning: Suspicious entry in docx archive.")
+                            return None
+                        total_uncompressed += info.file_size
+                        if total_uncompressed > 100 * 1024 * 1024:  # 100 MB max
+                            print("Security Warning: Document archive uncompressed size exceeds safe limit (100MB).")
+                            return None
+                    if len(zf.infolist()) > 5000:
+                        print("Security Warning: Document archive contains excessive file entries.")
+                        return None
+
             doc = docx.Document(file_path)
             qdoc.clear()
             cursor = QTextCursor(qdoc)
 
             for p in doc.paragraphs:
-                # Add runs with formatting
+                # Add runs with formatting (safely escaping HTML)
                 if p.style and p.style.name.startswith("Heading"):
-                    cursor.insertHtml(f"<h2>{p.text}</h2>")
+                    cursor.insertHtml(f"<h2>{html.escape(p.text)}</h2>")
                 elif p.style and p.style.name == "Title":
-                    cursor.insertHtml(f"<h1>{p.text}</h1>")
+                    cursor.insertHtml(f"<h1>{html.escape(p.text)}</h1>")
                 else:
                     for run in p.runs:
                         char_fmt = QTextCharFormat()
