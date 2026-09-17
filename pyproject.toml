@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "volumenodex"
-version = "1.0.0"
+version = "1.1.0"
 description = "Volumenodex: A native standalone Windows word processing studio with luxury print fidelity and deep narrative tools."
 readme = "README.md"
 requires-python = ">=3.10"

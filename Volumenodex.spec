@@ -1,5 +1,4 @@
-# -*- mode: python ; coding: utf-8 -*-
-
+from PyInstaller.utils.hooks import collect_data_files
 
 a = Analysis(
     ['main.py'],
@@ -9,7 +8,7 @@ a = Analysis(
         ('assets', 'assets'),
         ('volumenodex/reference/bundled_knowledge.json', 'volumenodex/reference'),
         ('volumenodex/resources', 'volumenodex/resources'),
-    ],
+    ] + collect_data_files('spellchecker'),
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
