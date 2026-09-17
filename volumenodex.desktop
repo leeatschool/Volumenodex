@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Volumenodex
+GenericName=Word Processing Studio
+Comment=Standalone Word Processing Studio and Reference Environment
+Exec=Volumenodex
+Icon=icon
+Terminal=false
+Categories=Office;WordProcessor;TextEditor;
+StartupNotify=true
