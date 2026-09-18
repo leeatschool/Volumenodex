@@ -239,3 +239,97 @@ def test_main_window_writers_reference(app):
     win.editor.document().setModified(False)
     dlg.close()
     win.close()
+
+
+def test_epub_parser_and_metadata():
+    """Verifies that the EpubParser extracts metadata, spine, TOC, and HTML chapters correctly."""
+    from volumenodex.reference.epub_reader import EpubParser
+    import glob
+    bundled_books = sorted(glob.glob(os.path.join(os.path.dirname(__file__), "..", "volumenodex", "resources", "books", "*.epub")))
+    assert len(bundled_books) >= 4
+
+    # Test loading a reference book
+    book = EpubParser.load_full_book(bundled_books[0])
+    assert book is not None
+    assert len(book.title) > 0
+    assert len(book.chapters) > 0
+    assert book.file_size_bytes > 0
+
+    # Test chapter content extraction
+    ch1 = book.chapters[0]
+    html = EpubParser.get_chapter_html(book, ch1)
+    assert len(html) > 0
+    assert "<html" in html.lower()
+
+
+def test_reference_bookshelf_manager():
+    """Verifies bookshelf discovery, cover palette styling, and searching."""
+    from volumenodex.reference.bookshelf_model import ReferenceBookshelfManager
+    manager = ReferenceBookshelfManager()
+    assert len(manager.books) >= 4
+
+    # Check cover styling
+    style = manager.get_style_for_book(manager.books[0])
+    assert style.leather_top.startswith("#")
+    assert style.gilt_foil.startswith("#")
+
+    # Filter books
+    results = manager.filter_books("Creatures")
+    assert any("Creatures" in b.title for b in results)
+
+
+def test_writers_reference_mode_switch_and_reader(app):
+    """Verifies switching between Quick Reference Search and Bookshelf, and reading books in the E-Reader."""
+    from volumenodex.ui.writers_reference_dialog import WritersReferenceDialog
+    dlg = WritersReferenceDialog()
+    dlg.show()
+    app.processEvents()
+
+    # 1. Mode Buttons Exist
+    assert hasattr(dlg, "btn_mode_quick_search")
+    assert hasattr(dlg, "btn_mode_bookshelf")
+    assert dlg.btn_mode_quick_search.isChecked()
+
+    # 2. Switch to Reference Bookshelf
+    dlg.switch_mode("bookshelf")
+    assert dlg.btn_mode_bookshelf.isChecked()
+    assert not dlg.btn_mode_quick_search.isChecked()
+    assert dlg.mode_stack.currentWidget() == dlg.bookshelf_stack
+
+    # Bookshelf view has book widgets
+    shelf = dlg.bookshelf_view
+    assert len(shelf._book_widgets) >= 4
+
+    # 3. Open first book in E-Reader
+    first_book = shelf._book_widgets[0].book
+    shelf.bookSelected.emit(first_book)
+    app.processEvents()
+
+    # Verify reader is active
+    assert dlg.bookshelf_stack.currentWidget() == dlg.reader_view
+    reader = dlg.reader_view
+    assert reader.current_book == first_book
+    assert len(reader.browser.toPlainText()) > 0
+    assert reader.list_toc.count() == len(first_book.chapters)
+
+    # 4. Navigate chapters
+    if len(first_book.chapters) > 1:
+        reader._next_chapter()
+        assert reader.current_chapter_index == 1
+        reader._prev_chapter()
+        assert reader.current_chapter_index == 0
+
+    # 5. Insert excerpt signal
+    received_excerpts = []
+    dlg.insertIntoDocumentRequested.connect(lambda text: received_excerpts.append(text))
+    reader.btn_insert_excerpt.click()
+    app.processEvents()
+    assert len(received_excerpts) >= 1
+    assert first_book.title in received_excerpts[0]
+
+    # 6. Back to shelf button
+    reader.btn_back.click()
+    app.processEvents()
+    assert dlg.bookshelf_stack.currentWidget() == dlg.bookshelf_view
+
+    dlg.close()

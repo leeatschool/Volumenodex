@@ -1211,6 +1211,8 @@ class MainWindow(QMainWindow):
 
     def _on_dark_paper_toggled(self, is_dark: bool) -> None:
         self.canvas_area.dark_paper = is_dark
+        if hasattr(self, "secondary_canvas") and self.secondary_canvas:
+            self.secondary_canvas.dark_paper = is_dark
         self.canvas_area.viewport().update()
 
     def _on_crop_marks_toggled(self, show: bool) -> None:

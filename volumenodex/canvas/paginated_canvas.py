@@ -10,7 +10,7 @@ from PySide6.QtGui import (
     QAbstractTextDocumentLayout, QTextCharFormat, QTextBlockFormat,
     QTextListFormat, QKeySequence, QLinearGradient, QRadialGradient,
     QPainterPath, QClipboard, QGuiApplication, QImage, QTextImageFormat, QPixmap, QIcon,
-    QTextTableFormat, QTextTable, QTextLength
+    QTextTableFormat, QTextTable, QTextLength, QPalette
 )
 from PySide6.QtWidgets import (
     QAbstractScrollArea, QScrollBar, QApplication, QMenu
@@ -48,7 +48,7 @@ class PaginatedCanvas(QAbstractScrollArea):
         self.texture_engine = texture_engine
         self.theme_manager = theme_manager
 
-        self.dark_paper = False
+        self._dark_paper = False
         self.show_margin_guides = True
         self.show_crop_marks = True
         self.typewriter_scrolling = False
@@ -60,6 +60,7 @@ class PaginatedCanvas(QAbstractScrollArea):
         # Document Engine
         self._doc = QTextDocument(self)
         self._doc.setUndoRedoEnabled(True)
+        self._doc.setDefaultStyleSheet("body { color: #000000; }")
 
         # Sublime default typography
         default_font = QFont("Georgia", 12)
@@ -67,6 +68,7 @@ class PaginatedCanvas(QAbstractScrollArea):
         self._doc.setDefaultFont(default_font)
 
         self._cursor = QTextCursor(self._doc)
+        self._apply_default_text_format()
         self._cursor_visible = True
         self._is_mouse_selecting = False
         self._lens_findings = []
@@ -104,6 +106,24 @@ class PaginatedCanvas(QAbstractScrollArea):
     def document(self) -> QTextDocument:
         return self._doc
 
+    @property
+    def dark_paper(self) -> bool:
+        return getattr(self, "_dark_paper", False)
+
+    @dark_paper.setter
+    def dark_paper(self, value: bool) -> None:
+        self._dark_paper = bool(value)
+        css_color = "#ffffff" if self._dark_paper else "#000000"
+        self._doc.setDefaultStyleSheet(f"body {{ color: {css_color}; }}")
+        self._apply_default_text_format()
+        self.viewport().update()
+
+    def _apply_default_text_format(self) -> None:
+        default_color = QColor("#ffffff" if self.dark_paper else "#000000")
+        fmt = self._cursor.charFormat()
+        fmt.setForeground(default_color)
+        self._cursor.setCharFormat(fmt)
+
     def set_document(self, doc: QTextDocument) -> None:
         """Shares or binds an existing QTextDocument to this canvas."""
         try:
@@ -111,7 +131,10 @@ class PaginatedCanvas(QAbstractScrollArea):
         except Exception:
             pass
         self._doc = doc
+        css_color = "#ffffff" if self.dark_paper else "#000000"
+        self._doc.setDefaultStyleSheet(f"body {{ color: {css_color}; }}")
         self._cursor = QTextCursor(self._doc)
+        self._apply_default_text_format()
         self._doc.contentsChanged.connect(self._on_doc_contents_changed)
         self.sync_document_geometry()
         self._update_scroll_bars()
@@ -300,6 +323,8 @@ class PaginatedCanvas(QAbstractScrollArea):
 
             # Draw document slice with cursor and selection
             ctx = QAbstractTextDocumentLayout.PaintContext()
+            default_text_color = QColor("#ffffff" if self.dark_paper else "#000000")
+            ctx.palette.setColor(QPalette.ColorRole.Text, default_text_color)
             ctx.cursorPosition = self._cursor.position() if (self._cursor_visible and self.hasFocus()) else -1
             # CRITICAL OPTIMIZATION: Tell Qt to cull all blocks outside this page slice in document coordinates!
             ctx.clip = QRectF(0, p * ph_print, pw_print, ph_print)
@@ -724,6 +749,18 @@ class PaginatedCanvas(QAbstractScrollArea):
                 self._reset_cursor_blink()
                 self.viewport().update()
                 return
+
+            # Ensure default text color matches paper mode (black on light paper, white on dark paper)
+            cf = self._cursor.charFormat()
+            target_color = QColor("#ffffff" if self.dark_paper else "#000000")
+            old_default = QColor("#000000" if self.dark_paper else "#ffffff")
+            if (
+                cf.foreground().style() == Qt.BrushStyle.NoBrush
+                or not cf.foreground().color().isValid()
+                or cf.foreground().color() == old_default
+            ):
+                cf.setForeground(target_color)
+                self._cursor.setCharFormat(cf)
 
             self._cursor.insertText(typed_char)
             is_space = typed_char == " "
@@ -1213,6 +1250,7 @@ class PaginatedCanvas(QAbstractScrollArea):
     def setPlainText(self, text: str) -> None:
         self._doc.setPlainText(text)
         self._cursor = QTextCursor(self._doc)
+        self._apply_default_text_format()
         self.sync_document_geometry()
 
     def setHtml(self, html: str) -> None:
@@ -1222,7 +1260,10 @@ class PaginatedCanvas(QAbstractScrollArea):
 
     def clear(self) -> None:
         self._doc.clear()
+        css_color = "#ffffff" if self.dark_paper else "#000000"
+        self._doc.setDefaultStyleSheet(f"body {{ color: {css_color}; }}")
         self._cursor = QTextCursor(self._doc)
+        self._apply_default_text_format()
         self.sync_document_geometry()
 
     def textCursor(self) -> QTextCursor:
@@ -1269,11 +1310,23 @@ class PaginatedCanvas(QAbstractScrollArea):
             self.sync_document_geometry()
             self.viewport().update()
 
-    def paste_plain(self) -> None:
+    def paste_plain(self, text: Optional[str] = None) -> None:
         """Pastes plain text without any formatting, matching surrounding text format."""
-        mime = QApplication.clipboard().mimeData()
-        if mime and mime.hasText():
-            self._cursor.insertText(mime.text())
+        if text is None:
+            clipboard = QApplication.clipboard()
+            try:
+                text = clipboard.text()
+            except Exception:
+                text = ""
+            if not text:
+                try:
+                    mime = clipboard.mimeData()
+                    if mime and mime.hasText():
+                        text = mime.text()
+                except Exception:
+                    pass
+        if text:
+            self._cursor.insertText(text)
             self.sync_document_geometry()
             self.viewport().update()
 

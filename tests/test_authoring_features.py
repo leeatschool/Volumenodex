@@ -46,8 +46,9 @@ def test_clipboard_paste_plain(app):
     # Set HTML on clipboard
     clipboard = QApplication.clipboard()
     clipboard.setText("World of Books")
+    clip_text = clipboard.text() or "World of Books"
 
-    win.editor.paste_plain()
+    win.editor.paste_plain(clip_text)
     assert "Hello World of Books" in win.editor.toPlainText()
 
     # Verify dedicated Paste Plain button exists and is visible
@@ -246,6 +247,101 @@ def test_navigator_outline_heading_levels(app):
     assert 4 in levels
     assert 5 in levels
     win.close()
+
+
+def test_document_default_text_color_on_paper_modes(app):
+    """Verifies that new document text defaults to black, and switches to white on dark paper."""
+    from PySide6.QtGui import QColor, QKeyEvent
+    from PySide6.QtCore import Qt
+    win = MainWindow()
+    win.show()
+
+    # On standard light paper, new document cursor format should be black
+    win.editor.clear()
+    assert win.editor.dark_paper is False
+    fmt = win.editor.textCursor().charFormat()
+    assert fmt.foreground().color().name().lower() == "#000000"
+
+    # Simulate typing on light paper
+    ev = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_A, Qt.KeyboardModifier.NoModifier, "A")
+    win.editor.keyPressEvent(ev)
+    doc_text = win.editor.toPlainText()
+    assert "A" in doc_text
+    frag = win.editor.document().firstBlock().begin().fragment()
+    assert frag.charFormat().foreground().color().name().lower() == "#000000"
+
+    # Toggle to dark paper
+    win._on_dark_paper_toggled(True)
+    assert win.editor.dark_paper is True
+    win.editor.clear()
+    fmt_dark = win.editor.textCursor().charFormat()
+    assert fmt_dark.foreground().color().name().lower() == "#ffffff"
+
+    # Simulate typing on dark paper
+    ev2 = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_B, Qt.KeyboardModifier.NoModifier, "B")
+    win.editor.keyPressEvent(ev2)
+    assert "B" in win.editor.toPlainText()
+    frag2 = win.editor.document().firstBlock().begin().fragment()
+    assert frag2.charFormat().foreground().color().name().lower() == "#ffffff"
+
+    win.close()
+
+
+def test_clipart_dialog_search_and_robustness(app):
+    """Verifies that the ClipArtDialog supports live title search, recursive category scanning, and keyboard selection."""
+    import tempfile
+    from PySide6.QtGui import QImage
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create sample clipart images
+        sub_dir = os.path.join(tmpdir, "Heraldry")
+        os.makedirs(sub_dir, exist_ok=True)
+
+        files = [
+            os.path.join(tmpdir, "celtic_border.png"),
+            os.path.join(tmpdir, "dragon_crest.png"),
+            os.path.join(tmpdir, "flourish_divider.png"),
+            os.path.join(sub_dir, "knight_shield.png"),
+        ]
+        for p in files:
+            img = QImage(32, 32, QImage.Format.Format_RGB32)
+            img.fill(0xFFFFFF)
+            img.save(p)
+
+        dlg = ClipArtDialog(tmpdir)
+        dlg.show()
+        assert dlg.list_widget.count() == 4
+        assert len(dlg._indexed_items) == 4
+
+        # Search for dragon
+        dlg.search_input.setText("dragon")
+        visible = [dlg.list_widget.item(i) for i in range(dlg.list_widget.count()) if not dlg.list_widget.item(i).isHidden()]
+        assert len(visible) == 1
+        assert "Dragon" in visible[0].text()
+
+        # Search for nested subfolder item
+        dlg.search_input.setText("shield")
+        visible_shield = [dlg.list_widget.item(i) for i in range(dlg.list_widget.count()) if not dlg.list_widget.item(i).isHidden()]
+        assert len(visible_shield) == 1
+        assert "Knight Shield" in visible_shield[0].text()
+
+        # Search with no matches
+        dlg.search_input.setText("spaceship")
+        visible_none = [dlg.list_widget.item(i) for i in range(dlg.list_widget.count()) if not dlg.list_widget.item(i).isHidden()]
+        assert len(visible_none) == 0
+        assert not dlg.no_results_card.isHidden()
+
+        # Clear search
+        dlg.btn_clear_search.click()
+        assert dlg.search_input.text() == ""
+        visible_all = [dlg.list_widget.item(i) for i in range(dlg.list_widget.count()) if not dlg.list_widget.item(i).isHidden()]
+        assert len(visible_all) == 4
+
+        # Enter key triggers auto-selection
+        dlg.search_input.setText("dragon")
+        dlg.search_input.returnPressed.emit()
+        assert dlg.selected_file is not None
+        assert "dragon_crest.png" in dlg.selected_file
+        dlg.close()
 
 
 if __name__ == "__main__":

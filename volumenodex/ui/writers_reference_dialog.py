@@ -15,11 +15,14 @@ from PySide6.QtWidgets import (
     QApplication, QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QListWidget, QListWidgetItem,
     QScrollArea, QFrame, QSplitter, QTextBrowser, QComboBox,
-    QMessageBox, QFileDialog, QSizePolicy
+    QMessageBox, QFileDialog, QSizePolicy, QStackedWidget
 )
 
 from volumenodex.reference.reference_model import ReferenceEntry, ReferenceCategory
 from volumenodex.reference.reference_manager import ReferenceManager
+from volumenodex.reference.bookshelf_model import ReferenceBookshelfManager
+from volumenodex.ui.reference_bookshelf_view import ReferenceBookshelfView, BuiltInEpubReaderView
+from volumenodex.reference.epub_reader import EpubBook
 from volumenodex.ui.vector_icons import VectorIconFactory
 
 
@@ -35,6 +38,7 @@ class WritersReferenceDialog(QDialog):
         self.setMinimumSize(780, 520)
 
         self.manager = manager or ReferenceManager()
+        self.bookshelf_manager = ReferenceBookshelfManager()
         self._custom_logo_path = self._discover_logo_path()
         if self._custom_logo_path and os.path.exists(self._custom_logo_path):
             self.setWindowIcon(QIcon(self._custom_logo_path))
@@ -228,6 +232,80 @@ class WritersReferenceDialog(QDialog):
 
         root_layout.addLayout(h_header)
 
+        # Mode Selection Switcher: Quick Reference Search vs Reference Bookshelf
+        h_mode_bar = QHBoxLayout()
+        h_mode_bar.setSpacing(10)
+
+        self.btn_mode_quick_search = QPushButton("🔍 Quick Reference Search")
+        self.btn_mode_quick_search.setCheckable(True)
+        self.btn_mode_quick_search.setChecked(True)
+        self.btn_mode_quick_search.setStyleSheet("""
+            QPushButton {
+                font-size: 13px;
+                padding: 7px 18px;
+                border-radius: 6px;
+                font-weight: 700;
+            }
+            QPushButton:checked {
+                background-color: #7aa2f7;
+                color: #101116;
+                border: 1px solid #7aa2f7;
+            }
+            QPushButton:!checked {
+                background-color: #181924;
+                color: #a2a7c4;
+                border: 1px solid #2a2c3f;
+            }
+            QPushButton:!checked:hover {
+                background-color: #232638;
+                color: #ffffff;
+                border-color: #7aa2f7;
+            }
+        """)
+        self.btn_mode_quick_search.clicked.connect(lambda: self.switch_mode("quick_search"))
+        h_mode_bar.addWidget(self.btn_mode_quick_search)
+
+        self.btn_mode_bookshelf = QPushButton("📚 Reference Book Shelf")
+        self.btn_mode_bookshelf.setCheckable(True)
+        self.btn_mode_bookshelf.setChecked(False)
+        self.btn_mode_bookshelf.setStyleSheet("""
+            QPushButton {
+                font-size: 13px;
+                padding: 7px 18px;
+                border-radius: 6px;
+                font-weight: 700;
+            }
+            QPushButton:checked {
+                background-color: #7aa2f7;
+                color: #101116;
+                border: 1px solid #7aa2f7;
+            }
+            QPushButton:!checked {
+                background-color: #181924;
+                color: #a2a7c4;
+                border: 1px solid #2a2c3f;
+            }
+            QPushButton:!checked:hover {
+                background-color: #232638;
+                color: #ffffff;
+                border-color: #7aa2f7;
+            }
+        """)
+        self.btn_mode_bookshelf.clicked.connect(lambda: self.switch_mode("bookshelf"))
+        h_mode_bar.addWidget(self.btn_mode_bookshelf)
+
+        h_mode_bar.addStretch()
+        root_layout.addLayout(h_mode_bar)
+
+        # Primary Stack: Quick Reference Search vs Reference Bookshelf
+        self.mode_stack = QStackedWidget(self)
+
+        # Page 0: Quick Reference Search Container
+        self.quick_search_container = QWidget()
+        v_qs = QVBoxLayout(self.quick_search_container)
+        v_qs.setContentsMargins(0, 0, 0, 0)
+        v_qs.setSpacing(10)
+
         # 2. Search Bar
         h_search = QHBoxLayout()
         h_search.setSpacing(8)
@@ -239,7 +317,7 @@ class WritersReferenceDialog(QDialog):
         btn_clear = QPushButton("✕ Clear")
         btn_clear.clicked.connect(self._clear_search)
         h_search.addWidget(btn_clear)
-        root_layout.addLayout(h_search)
+        v_qs.addLayout(h_search)
 
         # 3. Category Filter Chips (Scrollable row)
         cat_scroll = QScrollArea()
@@ -286,7 +364,7 @@ class WritersReferenceDialog(QDialog):
 
         self.cat_layout.addStretch()
         cat_scroll.setWidget(cat_container)
-        root_layout.addWidget(cat_scroll)
+        v_qs.addWidget(cat_scroll)
 
         # 4. Main Two-Pane Splitter: Results List + Detail Viewer
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -349,7 +427,41 @@ class WritersReferenceDialog(QDialog):
         splitter.addWidget(right_container)
 
         splitter.setSizes([340, 700])
-        root_layout.addWidget(splitter, stretch=1)
+        v_qs.addWidget(splitter, stretch=1)
+        self.mode_stack.addWidget(self.quick_search_container)
+
+        # Page 1: Reference Bookshelf Stack (Bookshelf View + E-Reader View)
+        self.bookshelf_stack = QStackedWidget(self)
+
+        self.bookshelf_view = ReferenceBookshelfView(self.bookshelf_manager, self)
+        self.bookshelf_view.bookSelected.connect(self._open_book_in_reader)
+        self.bookshelf_stack.addWidget(self.bookshelf_view)
+
+        self.reader_view = BuiltInEpubReaderView(self)
+        self.reader_view.backToShelfRequested.connect(lambda: self.bookshelf_stack.setCurrentWidget(self.bookshelf_view))
+        self.reader_view.insertIntoDocumentRequested.connect(self.insertIntoDocumentRequested.emit)
+        self.bookshelf_stack.addWidget(self.reader_view)
+
+        self.mode_stack.addWidget(self.bookshelf_stack)
+        root_layout.addWidget(self.mode_stack, stretch=1)
+
+    def switch_mode(self, mode: str) -> None:
+        """Switches between Quick Reference Search and the Reference Bookshelf."""
+        if mode == "quick_search":
+            self.btn_mode_quick_search.setChecked(True)
+            self.btn_mode_bookshelf.setChecked(False)
+            self.mode_stack.setCurrentWidget(self.quick_search_container)
+        else:
+            self.btn_mode_quick_search.setChecked(False)
+            self.btn_mode_bookshelf.setChecked(True)
+            self.mode_stack.setCurrentWidget(self.bookshelf_stack)
+            self.bookshelf_stack.setCurrentWidget(self.bookshelf_view)
+            self.bookshelf_view.refresh_shelf()
+
+    def _open_book_in_reader(self, book: EpubBook) -> None:
+        """Opens a bound volume from the bookshelf in the built-in e-reader."""
+        self.reader_view.load_book(book)
+        self.bookshelf_stack.setCurrentWidget(self.reader_view)
 
     def _render_logo(self) -> None:
         """Renders the Writers Reference logo emblem."""
