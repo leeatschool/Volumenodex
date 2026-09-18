@@ -4,7 +4,7 @@ import html
 import os
 from datetime import datetime
 from typing import Optional
-from PySide6.QtCore import Qt, QTime, QDate, QTimer, QThreadPool
+from PySide6.QtCore import Qt, QTime, QDate, QTimer, QThreadPool, QThread, Signal
 from PySide6.QtGui import (
     QFont, QColor, QTextCursor, QTextBlockFormat, QTextCharFormat,
     QTextListFormat, QAction, QKeySequence, QIcon, QCloseEvent, QActionGroup,
@@ -41,7 +41,7 @@ from volumenodex.corkboard import CorkboardManager, CorkboardView, IndexCard
 from volumenodex.story import CodexManager, ChapterNavigatorDrawer, CharacterCodexDrawer
 from volumenodex.story.codex_extractor import CodexExtractionEngine
 from volumenodex.review import RevisionLensEngine, RevisionInspectorDrawer, LensFinding, SpellCheckEngine
-from volumenodex.review.revision_worker import ReviewWorker
+from volumenodex.review.revision_worker import ReviewWorker, ReviewAnalysisWorker
 from volumenodex.academic.citation_model import CitationManager, CitationEntry, CitationFormatter
 from volumenodex.academic.citation_drawer import CitationGeneratorDrawer
 from volumenodex.ui.new_document_dialog import NewDocumentDialog
@@ -53,6 +53,8 @@ from volumenodex.ui.settings_dialog import SettingsDialog
 
 class MainWindow(QMainWindow):
     """The central studio window for Volumenodex."""
+
+    requestReviewAnalysis = Signal(str, dict, int)
 
     def __init__(self):
         super().__init__()
@@ -90,6 +92,15 @@ class MainWindow(QMainWindow):
         self._lens_debounce_timer.setSingleShot(True)
         self._lens_debounce_timer.setInterval(300)
         self._lens_debounce_timer.timeout.connect(self._run_revision_analysis)
+
+        # Dedicated persistent background thread for editorial and spell analysis
+        self._review_thread = QThread()
+        self._review_worker = ReviewAnalysisWorker(self.spell_engine)
+        self._review_worker.moveToThread(self._review_thread)
+        self.requestReviewAnalysis.connect(self._review_worker.process_review)
+        self._review_worker.finished.connect(self._on_revision_worker_finished)
+        self.destroyed.connect(self._stop_threads)
+        self._review_thread.start()
 
         # Performance Debounce Timers (Eliminates typing and multi-page lag)
         self._metrics_debounce_timer = QTimer(self)
@@ -143,6 +154,9 @@ class MainWindow(QMainWindow):
             recent_list = self.settings_manager.recent_files
             if recent_list and os.path.exists(recent_list[0]):
                 self._load_file(recent_list[0])
+        else:
+            # Check for unsaved recovery document from prior session
+            QTimer.singleShot(300, self._check_pending_recovery)
 
     def _init_ui(self) -> None:
         central_widget = QWidget(self)
@@ -800,14 +814,7 @@ class MainWindow(QMainWindow):
 
         self._revision_request_id += 1
         req_id = self._revision_request_id
-        worker = ReviewWorker(
-            text=text,
-            active_lenses=self.active_lenses,
-            spell_engine=self.spell_engine,
-            request_id=req_id,
-        )
-        worker.signals.finished.connect(self._on_revision_worker_finished)
-        QThreadPool.globalInstance().start(worker)
+        self.requestReviewAnalysis.emit(text, dict(self.active_lenses), req_id)
 
     def _on_revision_worker_finished(self, findings: list, request_id: int) -> None:
         if request_id == self._revision_request_id:
@@ -1257,6 +1264,12 @@ class MainWindow(QMainWindow):
         delta = curr_words - self._last_metrics_words
         if delta > 0:
             self.settings_manager.record_words(delta)
+            if not hasattr(self, "_words_since_last_autosave"):
+                self._words_since_last_autosave = 0
+            self._words_since_last_autosave += delta
+            # Milestone auto-save safeguard: save draft whenever 40 words are written
+            if self._words_since_last_autosave >= 40:
+                self._on_autosave_timer()
         self._last_metrics_words = curr_words
         self.status_bar.update_daily_goal(
             self.settings_manager.daily_words_count,
@@ -1784,9 +1797,25 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._maybe_save_prompt():
+            self._stop_threads()
             event.accept()
         else:
             event.ignore()
+
+    def close(self) -> bool:
+        self._stop_threads()
+        return super().close()
+
+    def _stop_threads(self) -> None:
+        try:
+            if hasattr(self, "_review_thread") and self._review_thread is not None and self._review_thread.isRunning():
+                self._review_thread.quit()
+                self._review_thread.wait(500)
+        except Exception:
+            pass
+
+    def __del__(self):
+        self._stop_threads()
 
     # --- Variable Auto-Save & Settings Handlers ---
     def _apply_autosave_settings(self) -> None:
@@ -1811,6 +1840,7 @@ class MainWindow(QMainWindow):
             return
 
         now_str = datetime.now().strftime("%H:%M:%S")
+        self._words_since_last_autosave = 0
         if self.current_file_path:
             success = self.save_document()
             if success:
@@ -1824,17 +1854,56 @@ class MainWindow(QMainWindow):
             draft_dir = os.path.expanduser("~/.volumenodex/autosave")
             os.makedirs(draft_dir, exist_ok=True)
             draft_path = os.path.join(draft_dir, "untitled_recovery.docx")
+            tmp_path = os.path.join(draft_dir, "untitled_recovery.docx.tmp")
             meta = self.codex_manager.to_dict()
             meta["document_mode"] = self.document_mode.value
             meta["citations"] = self.citation_manager.to_dict()
             meta["citation_style"] = self.citation_manager.active_style
             if self.story_metadata:
                 meta.update(self.story_metadata)
-            IOManager.save_docx(draft_path, self.editor.document(), self.layout_model, meta)
+            success = IOManager.save_docx(tmp_path, self.editor.document(), self.layout_model, meta)
+            if success and os.path.exists(tmp_path):
+                if os.path.exists(draft_path):
+                    try:
+                        os.replace(tmp_path, draft_path)
+                    except OSError:
+                        import shutil
+                        shutil.copy2(tmp_path, draft_path)
+                        try:
+                            os.remove(tmp_path)
+                        except OSError:
+                            pass
+                else:
+                    os.rename(tmp_path, draft_path)
             self.ribbon.update_autosave_badge(f"Draft Saved ({now_str})")
             self.statusBar().showMessage(f"Draft auto-saved to recovery vault at {now_str}", 4000)
+            self._words_since_last_autosave = 0
         except Exception as e:
             print(f"Error during draft recovery save: {e}")
+
+    def _check_pending_recovery(self) -> None:
+        import sys
+        if "pytest" in sys.modules:
+            return
+        try:
+            recovery_path = os.path.expanduser("~/.volumenodex/autosave/untitled_recovery.docx")
+            if os.path.exists(recovery_path) and os.path.getsize(recovery_path) > 1000:
+                mod_time = datetime.fromtimestamp(os.path.getmtime(recovery_path)).strftime("%b %d, %Y at %I:%M %p")
+                reply = QMessageBox.question(
+                    self,
+                    "Document Recovery Available",
+                    f"Volumenodex detected an unsaved manuscript recovery draft from {mod_time}.\n\n"
+                    "Would you like to restore this recovered session?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes,
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    self._load_file(recovery_path)
+                    self.current_file_path = None
+                    self.setWindowTitle("Volumenodex — Recovered Draft (Unsaved)")
+                    self.statusBar().showMessage(f"Restored recovered session from {mod_time}.", 5000)
+        except Exception as e:
+            print(f"Error checking pending recovery: {e}")
 
     def _cleanup_draft_recovery(self) -> None:
         try:

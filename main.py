@@ -11,12 +11,24 @@ from PySide6.QtWidgets import QApplication
 from volumenodex.ui.main_window import MainWindow
 
 
+# Suppress harmless DirectWrite warnings natively at Qt C++ level
+os.environ.setdefault("QT_LOGGING_RULES", "qt.text.directwrite.warning=false;qt.gui.fonts=false")
+
+
 def _qt_message_handler(mode, context, message):
-    # Filter known harmless DirectWrite warnings for legacy DOS raster fonts (8514oem, Fixedsys)
-    if "DirectWrite: CreateFontFaceFromHDC" in message:
-        return
-    if mode in (QtMsgType.QtWarningMsg, QtMsgType.QtCriticalMsg, QtMsgType.QtFatalMsg):
-        sys.stderr.write(f"{message}\n")
+    try:
+        if not message:
+            return
+        # Filter known harmless DirectWrite warnings for legacy DOS raster fonts (8514oem, Fixedsys)
+        if "DirectWrite: CreateFontFaceFromHDC" in message or "CreateFontFace" in message:
+            return
+        if "PointSize <= 0" in message or "point size <= 0" in message.lower():
+            return
+        if mode in (QtMsgType.QtWarningMsg, QtMsgType.QtCriticalMsg, QtMsgType.QtFatalMsg):
+            if sys.stderr is not None and hasattr(sys.stderr, "write"):
+                sys.stderr.write(f"{message}\n")
+    except Exception:
+        pass
 
 
 def main():
@@ -37,7 +49,10 @@ def main():
         except Exception:
             pass
 
-    qInstallMessageHandler(_qt_message_handler)
+    try:
+        qInstallMessageHandler(_qt_message_handler)
+    except Exception:
+        pass
     # Configure high-DPI behavior
     app = QApplication(sys.argv)
     app.setApplicationName("Volumenodex")

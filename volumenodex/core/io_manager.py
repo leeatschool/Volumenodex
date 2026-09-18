@@ -209,7 +209,7 @@ class IOManager:
                             char_fmt.setFontUnderline(True)
                         if run.font.name:
                             char_fmt.setFontFamilies([run.font.name])
-                        if run.font.size:
+                        if run.font.size and run.font.size.pt > 0:
                             char_fmt.setFontPointSize(run.font.size.pt)
 
                         # Restore Foreground Text Color

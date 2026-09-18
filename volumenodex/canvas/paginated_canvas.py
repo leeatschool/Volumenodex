@@ -798,6 +798,8 @@ class PaginatedCanvas(QAbstractScrollArea):
         self.viewport().update()
 
     def set_font_size(self, pt_size: int) -> None:
+        if pt_size <= 0:
+            return
         fmt = QTextCharFormat()
         fmt.setFontPointSize(pt_size)
         self._cursor.mergeCharFormat(fmt)
