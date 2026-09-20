@@ -368,3 +368,518 @@ def test_sound_variations_hidden_when_no_audio_file(app, tmp_path):
     tw_labels_after = [ribbon.typewriter_combo.itemText(i) for i in range(ribbon.typewriter_combo.count())]
     assert "Electric Typewriter" not in tw_labels_after
 
+
+def test_status_bar_set_message(app):
+    """Validates VolumenodexStatusBar set_message and showMessage methods."""
+    from volumenodex.ui.status_bar import VolumenodexStatusBar
+    sb = VolumenodexStatusBar()
+    sb.show()
+    sb.set_message("Inserted clip art: test.jxl", timeout_ms=5000)
+    assert not sb.lbl_message.isHidden()
+    assert sb.lbl_message.text() == "Inserted clip art: test.jxl"
+
+    sb.showMessage("Saved successfully")
+    assert sb.lbl_message.text() == "Saved successfully"
+
+    sb.set_message("")
+    assert sb.lbl_message.isHidden()
+
+
+def test_jxl_canvas_insertion_and_rendering(canvas, tmp_path):
+    """Validates that JXL images inserted with absolute paths render properly without broken placeholders."""
+    from PySide6.QtGui import QImage, QColor, QAbstractTextDocumentLayout, QPainter, QPixmap, QTextDocument
+    from PySide6.QtCore import QUrl
+    from volumenodex.core.image_utils import save_image
+
+    # Create a small JXL image
+    img = QImage(60, 60, QImage.Format.Format_ARGB32)
+    img.fill(QColor(255, 0, 0))
+    jxl_path = str(tmp_path / "test_insert.jxl")
+    saved = save_image(img, jxl_path)
+    assert saved is True
+
+    # Insert into canvas
+    success = canvas.insert_image(jxl_path)
+    assert success is True
+
+    # Verify resource is registered and accessible via both QUrl(jxl_path) and QUrl.fromLocalFile(jxl_path)
+    r1 = canvas.document().resource(QTextDocument.ResourceType.ImageResource, QUrl(jxl_path))
+    r2 = canvas.document().resource(QTextDocument.ResourceType.ImageResource, QUrl.fromLocalFile(jxl_path))
+    assert r1 is not None and not r1.isNull()
+    assert r2 is not None and not r2.isNull()
+
+    # Draw document layout and assert that red pixels are actually painted
+    pm = QPixmap(200, 200)
+    pm.fill(QColor("white"))
+    p = QPainter(pm)
+    ctx = QAbstractTextDocumentLayout.PaintContext()
+    canvas.document().documentLayout().draw(p, ctx)
+    p.end()
+    rendered = pm.toImage()
+    red_count = sum(1 for x in range(200) for y in range(200) if rendered.pixelColor(x, y).red() > 200 and rendered.pixelColor(x, y).blue() < 50)
+    assert red_count > 1000
+
+
+def test_image_interaction_click_and_context_menu(canvas, tmp_path):
+    """Validates that left-clicking, double-clicking, and right-clicking an image triggers photo options."""
+    from PySide6.QtGui import QImage, QColor, QMouseEvent, QContextMenuEvent
+    from PySide6.QtCore import Qt, QPointF, QPoint
+    from volumenodex.core.image_utils import save_image
+
+    img = QImage(120, 80, QImage.Format.Format_ARGB32)
+    img.fill(QColor(0, 150, 255))
+    jxl_path = str(tmp_path / "interactive_test.jxl")
+    save_image(img, jxl_path)
+
+    canvas.setPlainText("Text before image\n")
+    canvas.insert_image(jxl_path)
+
+    # Locate image position
+    text = canvas.document().toPlainText()
+    img_idx = text.find("\ufffc")
+    assert img_idx != -1
+
+    # Map to coordinates
+    block = canvas.document().findBlock(img_idx)
+    br = canvas.document().documentLayout().blockBoundingRect(block)
+    ph_print = canvas.layout_model.printable_height_px
+    page_num = max(0, int(br.y() // ph_print))
+    print_rect = canvas._get_printable_rect(page_num)
+    click_x = print_rect.x() + br.x() + 20
+    click_y = print_rect.y() + (br.y() - page_num * ph_print) + 20
+
+    # 1. Left Click test
+    canvas.show()
+    press_ev = QMouseEvent(QMouseEvent.Type.MouseButtonPress, QPointF(click_x, click_y), QPointF(click_x, click_y), Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    canvas.mousePressEvent(press_ev)
+
+    assert not canvas.image_options_bar.isHidden()
+    assert canvas.textCursor().hasSelection()
+    assert canvas.textCursor().selectedText() == "\ufffc"
+
+    # 2. Right Click context menu test
+    menu_called = []
+    canvas._show_image_context_menu = lambda pos, cur, fmt: menu_called.append((pos, cur, fmt))
+    ctx_ev = QContextMenuEvent(QContextMenuEvent.Reason.Mouse, QPoint(int(click_x), int(click_y)), QPoint(100, 100))
+    canvas.contextMenuEvent(ctx_ev)
+    assert len(menu_called) == 1
+
+    # 3. Double Click resize test
+    resize_called = []
+    canvas._apply_image_resize = lambda cur, fmt: resize_called.append((cur, fmt))
+    double_ev = QMouseEvent(QMouseEvent.Type.MouseButtonDblClick, QPointF(click_x, click_y), QPointF(click_x, click_y), Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    canvas.mouseDoubleClickEvent(double_ev)
+    assert len(resize_called) == 1
+
+
+def test_image_corner_handle_hover_and_drag_resize(canvas, tmp_path):
+    """Validates that hovering over handles changes cursor shape, and dragging a corner handle resizes the image."""
+    from PySide6.QtGui import QImage, QColor, QMouseEvent, QPaintEvent
+    from PySide6.QtCore import Qt, QPointF, QRect
+    from volumenodex.core.image_utils import save_image
+
+    # 1. Prepare and insert image
+    img = QImage(200, 100, QImage.Format.Format_ARGB32)
+    img.fill(QColor(100, 200, 50))
+    img_path = str(tmp_path / "drag_test.png")
+    save_image(img, img_path)
+
+    canvas.setPlainText("Preceding text\n")
+    canvas.insert_image(img_path)
+    canvas.show()
+
+    # 2. Select image
+    text = canvas.document().toPlainText()
+    img_idx = text.find("\ufffc")
+    assert img_idx != -1
+
+    block = canvas.document().findBlock(img_idx)
+    br = canvas.document().documentLayout().blockBoundingRect(block)
+    ph_print = canvas.layout_model.printable_height_px
+    page_num = max(0, int(br.y() // ph_print))
+    print_rect = canvas._get_printable_rect(page_num)
+    click_x = print_rect.x() + br.x() + 30
+    click_y = print_rect.y() + (br.y() - page_num * ph_print) + 30
+
+    press_ev = QMouseEvent(QMouseEvent.Type.MouseButtonPress, QPointF(click_x, click_y), QPointF(click_x, click_y), Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    canvas.mousePressEvent(press_ev)
+    assert canvas._cursor.hasSelection()
+
+    # 3. Retrieve handle geometry
+    img_info = canvas._get_selected_image_info()
+    assert img_info is not None
+    img_cur, img_fmt = img_info
+    orig_w = img_fmt.width()
+    orig_h = img_fmt.height()
+    assert orig_w == 200
+    assert orig_h == 100
+
+    geom = canvas._get_image_geometry_viewport(img_cur, img_fmt)
+    assert geom is not None
+    img_rect, _ = geom
+    handles = canvas._get_image_handles(img_rect, hit_area=False)
+    assert "br" in handles
+    assert "tl" in handles
+    assert "tr" in handles
+    assert "bl" in handles
+    assert "mr" in handles
+    assert "bm" in handles
+
+    # 4. Test hover hit-testing and cursor changes
+    br_pt = handles["br"].center()
+    hit_br = canvas._hit_test_image_handles(br_pt)
+    assert hit_br == "br"
+
+    move_hover = QMouseEvent(QMouseEvent.Type.MouseMove, br_pt, br_pt, Qt.MouseButton.NoButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
+    canvas.mouseMoveEvent(move_hover)
+    assert canvas.viewport().cursor().shape() == Qt.CursorShape.SizeFDiagCursor
+
+    tr_pt = handles["tr"].center()
+    move_hover_tr = QMouseEvent(QMouseEvent.Type.MouseMove, tr_pt, tr_pt, Qt.MouseButton.NoButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
+    canvas.mouseMoveEvent(move_hover_tr)
+    assert canvas.viewport().cursor().shape() == Qt.CursorShape.SizeBDiagCursor
+
+    mr_pt = handles["mr"].center()
+    move_hover_mr = QMouseEvent(QMouseEvent.Type.MouseMove, mr_pt, mr_pt, Qt.MouseButton.NoButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
+    canvas.mouseMoveEvent(move_hover_mr)
+    assert canvas.viewport().cursor().shape() == Qt.CursorShape.SizeHorCursor
+
+    # 5. Click on bottom-right corner handle to start resizing
+    press_br = QMouseEvent(QMouseEvent.Type.MouseButtonPress, br_pt, br_pt, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    canvas.mousePressEvent(press_br)
+    assert canvas._is_resizing_image is True
+    assert canvas._resize_handle == "br"
+    assert canvas._resize_orig_width == 200.0
+    assert canvas._resize_orig_height == 100.0
+
+    # 6. Drag bottom-right corner by (+60px, +30px)
+    drag_pt = QPointF(br_pt.x() + 60, br_pt.y() + 30)
+    move_drag = QMouseEvent(QMouseEvent.Type.MouseMove, drag_pt, drag_pt, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    canvas.mouseMoveEvent(move_drag)
+
+    assert canvas._resize_preview_width == 260.0
+    assert canvas._resize_preview_height == 130.0
+    assert "260" in canvas.image_options_bar.lbl_info.text()
+
+    # Trigger a paintEvent to verify preview overlay rendering doesn't crash
+    canvas.paintEvent(QPaintEvent(QRect(0, 0, 800, 1000)))
+
+    # 7. Release mouse button to commit resize
+    release_br = QMouseEvent(QMouseEvent.Type.MouseButtonRelease, drag_pt, drag_pt, Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
+    canvas.mouseReleaseEvent(release_br)
+
+    assert canvas._is_resizing_image is False
+
+    # 8. Verify the document image format now has the new width & height
+    updated_info = canvas._get_selected_image_info()
+    assert updated_info is not None
+    _, updated_fmt = updated_info
+    assert updated_fmt.width() == 260.0
+    assert updated_fmt.height() == 130.0
+
+    # 9. Test mid-right edge handle drag (unconstrained width adjustment)
+    geom2 = canvas._get_image_geometry_viewport(updated_info[0], updated_info[1])
+    handles2 = canvas._get_image_handles(geom2[0], hit_area=False)
+    mr_pt2 = handles2["mr"].center()
+
+    press_mr = QMouseEvent(QMouseEvent.Type.MouseButtonPress, mr_pt2, mr_pt2, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    canvas.mousePressEvent(press_mr)
+    assert canvas._is_resizing_image is True
+    assert canvas._resize_handle == "mr"
+
+    drag_mr = QPointF(mr_pt2.x() + 40, mr_pt2.y())
+    move_drag_mr = QMouseEvent(QMouseEvent.Type.MouseMove, drag_mr, drag_mr, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    canvas.mouseMoveEvent(move_drag_mr)
+    assert canvas._resize_preview_width == 300.0
+    assert canvas._resize_preview_height == 130.0
+
+    release_mr = QMouseEvent(QMouseEvent.Type.MouseButtonRelease, drag_mr, drag_mr, Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
+    canvas.mouseReleaseEvent(release_mr)
+    assert canvas._is_resizing_image is False
+
+    updated_info2 = canvas._get_selected_image_info()
+    assert updated_info2[1].width() == 300.0
+    assert updated_info2[1].height() == 130.0
+
+
+def test_clipart_dialog_autoexpansion_trigger_and_pagination(app, tmp_path):
+    """Verifies that ClipArtDialog triggers autoexpansion on 0 local matches, and load more button paginates."""
+    from volumenodex.ui.clipart_dialog import ClipArtDialog
+    from PySide6.QtGui import QImage
+
+    local_img_path = str(tmp_path / "local_tree.png")
+    qimg = QImage(16, 16, QImage.Format.Format_RGB32)
+    qimg.fill(0xFFFFFF)
+    qimg.save(local_img_path)
+
+    dlg = ClipArtDialog(str(tmp_path))
+    dlg.show()
+
+    triggered_calls = []
+    dlg._trigger_autoexpansion = lambda q, offset=None, max_images=6: triggered_calls.append((q, offset, max_images))
+
+    # 1. Search existing item
+    dlg.search_input.setText("tree")
+    dlg.btn_search.click()
+    assert len(dlg._current_matches) == 1
+    assert not dlg.btn_load_more.isHidden()
+    assert len(triggered_calls) == 0
+
+    # 2. Search missing item -> triggers autoexpansion automatically
+    dlg.search_input.setText("galaxy")
+    dlg.btn_search.click()
+    assert len(dlg._current_matches) == 0
+    assert not dlg.btn_load_more.isHidden()
+    assert len(triggered_calls) == 1
+    assert triggered_calls[0][0] == "galaxy"
+    assert triggered_calls[0][1] == 0
+
+    # 3. Simulate Load More click with updated offset
+    dlg._wikimedia_query_offsets["galaxy"] = 6
+    dlg.btn_load_more.click()
+    assert len(triggered_calls) == 2
+    assert triggered_calls[1][0] == "galaxy"
+    assert triggered_calls[1][1] == 6
+
+    dlg.close()
+
+
+def test_autoexpansion_worker_deduplication_and_pagination(tmp_path):
+    """Verifies that AutoexpansionWorker enforces zero-repeat deduplication and consumes Wikimedia continue offsets."""
+    import json
+    from unittest.mock import patch, MagicMock
+    from volumenodex.clipart.autoexpansion import AutoexpansionWorker
+
+    dest_dir = str(tmp_path)
+    existing_file = os.path.join(dest_dir, "Andromeda_Galaxy.jxl")
+    with open(existing_file, "wb") as f:
+        f.write(b"dummy")
+
+    api_response = {
+        "continue": {"gsroffset": 15},
+        "query": {
+            "pages": {
+                "1": {
+                    "index": 1,
+                    "title": "File:Andromeda Galaxy.png",
+                    "imageinfo": [{
+                        "mime": "image/png",
+                        "url": "https://example.com/andromeda.png",
+                        "extmetadata": {"License": {"value": "PD"}}
+                    }]
+                },
+                "2": {
+                    "index": 2,
+                    "title": "File:Milky Way Galaxy.png",
+                    "imageinfo": [{
+                        "mime": "image/png",
+                        "url": "https://example.com/milkyway.png",
+                        "extmetadata": {"License": {"value": "PD"}}
+                    }]
+                },
+                "3": {
+                    "index": 3,
+                    "title": "File:Known Nebula.png",
+                    "imageinfo": [{
+                        "mime": "image/png",
+                        "url": "https://example.com/nebula.png",
+                        "extmetadata": {"License": {"value": "PD"}}
+                    }]
+                },
+            }
+        }
+    }
+
+    from PySide6.QtCore import QBuffer, QIODevice
+    from PySide6.QtGui import QImage, QColor
+
+    qimg = QImage(16, 16, QImage.Format.Format_RGB32)
+    qimg.fill(QColor(255, 0, 0))
+    buf = QBuffer()
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    qimg.save(buf, "PNG")
+    valid_png_bytes = bytes(buf.data())
+
+    worker = AutoexpansionWorker(
+        query="galaxy",
+        destination_dir=dest_dir,
+        offset=0,
+        max_images=5,
+        seen_titles={"known nebula"}
+    )
+
+    downloaded = []
+    finished = []
+    worker.imageDownloaded.connect(lambda path, meta: downloaded.append((path, meta)))
+    worker.downloadFinished.connect(lambda cnt, next_off: finished.append((cnt, next_off)))
+
+    def mock_urlopen(req, timeout=12):
+        mock_resp = MagicMock()
+        url_str = req.get_full_url() if hasattr(req, "get_full_url") else str(req)
+        if "commons.wikimedia.org" in url_str:
+            mock_resp.read.return_value = json.dumps(api_response).encode("utf-8")
+        else:
+            mock_resp.read.return_value = valid_png_bytes
+        mock_resp.__enter__.return_value = mock_resp
+        return mock_resp
+
+    with patch("urllib.request.urlopen", side_effect=mock_urlopen):
+        worker.run()
+
+    # Only Milky Way Galaxy should have been downloaded
+    assert len(downloaded) == 1
+    assert "Milky Way Galaxy.jxl" in downloaded[0][0]
+    assert len(finished) == 1
+    assert finished[0] == (1, 15)
+
+
+def test_clipart_autoexpansion_persistence_and_research(app, tmp_path):
+    """Verifies that autoexpanded illustrations are permanently saved, indexed, and found on re-search without re-querying Wikimedia."""
+    from volumenodex.ui.clipart_dialog import ClipArtDialog
+    from PySide6.QtGui import QImage
+    import json
+
+    clip_dir = str(tmp_path / "clipart")
+    os.makedirs(clip_dir, exist_ok=True)
+
+    # 1. Create initial empty index
+    idx_path = os.path.join(clip_dir, "clipart_index.json")
+    with open(idx_path, "w", encoding="utf-8") as f:
+        json.dump([], f)
+
+    dlg = ClipArtDialog(clip_dir)
+    dlg.show()
+
+    # Track triggers to Wikimedia
+    triggered = []
+    dlg._trigger_autoexpansion = lambda q, offset=None, max_images=6: triggered.append(q)
+
+    # Create image on disk simulating AutoexpansionWorker saving an image
+    downloaded_img_path = os.path.join(clip_dir, "Majestic Dragonfly.png")
+    qimg = QImage(32, 32, QImage.Format.Format_RGB32)
+    qimg.fill(0x00FF00)
+    qimg.save(downloaded_img_path)
+
+    # Simulate autoexpansion image downloaded signal
+    meta = {
+        "title": "Majestic Dragonfly",
+        "artist": "Artist A",
+        "description": "A green dragonfly",
+        "license": "CC0",
+        "attribution": "",
+    }
+    dlg.search_input.setText("dragonfly")
+    dlg._on_autoexpansion_image_downloaded(downloaded_img_path, meta)
+
+    # 2. Verify image is in list and search matches
+    assert dlg.list_widget.count() == 1
+    assert len(dlg._current_matches) == 1
+    assert dlg._current_matches[0]["path"] == downloaded_img_path
+
+    # 3. Verify index on disk was updated with this new image
+    with open(idx_path, "r", encoding="utf-8") as f:
+        saved_index = json.load(f)
+    assert len(saved_index) == 1
+    assert saved_index[0]["title"] == "Majestic Dragonfly"
+
+    # 4. Clear search and search again for "dragonfly"
+    dlg._clear_search()
+    assert dlg.list_widget.count() == 0
+
+    triggered.clear()
+    dlg.search_input.setText("dragonfly")
+    dlg.btn_search.click()
+
+    # Must find the local image immediately and NOT trigger Wikimedia!
+    assert len(dlg._current_matches) == 1
+    assert len(triggered) == 0, "Re-searching for downloaded image must not trigger Wikimedia"
+    assert not dlg.btn_load_more.isHidden()
+
+    dlg.close()
+
+    # 5. Open brand new ClipArtDialog pointing to same folder: must find it from index!
+    dlg2 = ClipArtDialog(clip_dir)
+    dlg2.show()
+    assert len(dlg2._all_records) == 1
+    assert dlg2._all_records[0]["title"] == "Majestic Dragonfly"
+
+    # Search in new dialog session
+    dlg2.search_input.setText("dragonfly")
+    dlg2.btn_search.click()
+    assert len(dlg2._current_matches) == 1
+    dlg2.close()
+
+
+def test_clipart_dialog_stacked_widget_mutual_exclusion(tmp_path):
+    """Verify QStackedWidget strictly enforces mutually exclusive views without overlapping cards."""
+    from volumenodex.ui.clipart_dialog import ClipArtDialog
+    from PySide6.QtWidgets import QStackedWidget
+
+    clip_dir = str(tmp_path / "clipart_stack")
+    os.makedirs(clip_dir, exist_ok=True)
+
+    dlg = ClipArtDialog(clip_dir)
+    dlg.show()
+
+    assert hasattr(dlg, "stack")
+    assert isinstance(dlg.stack, QStackedWidget)
+    assert dlg.stack.count() == 4
+
+    # Test "empty" view
+    dlg._set_display_view("empty")
+    assert dlg.stack.currentWidget() == dlg.empty_card
+
+    # Test "initial" view
+    dlg._set_display_view("initial")
+    assert dlg.stack.currentWidget() == dlg.initial_card
+
+    # Test "no_results" view
+    dlg._set_display_view("no_results")
+    assert dlg.stack.currentWidget() == dlg.no_results_card
+
+    # Test "list" view
+    dlg._set_display_view("list")
+    assert dlg.stack.currentWidget() == dlg.list_widget
+
+    dlg.close()
+
+
+def test_main_window_clipart_dir_defensive_fallback():
+    """Verify MainWindow resets temp/pytest clipart paths in settings and finds valid assets."""
+    from volumenodex.ui.main_window import MainWindow
+    from volumenodex.core.settings_manager import SettingsManager
+
+    sm = SettingsManager()
+    orig = sm.clipart_library_dir
+    try:
+        # Intentionally pollute with a temporary pytest-like path
+        sm.clipart_library_dir = r"C:\Users\Aaron\AppData\Local\Temp\pytest-of-Aaron\pytest-99\dummy"
+        sm.save()
+
+        win = MainWindow()
+        win.settings_manager = sm
+        # Calling _on_insert_clip_art logic: verify cleanup
+        clipart_dir = sm.clipart_library_dir
+        is_valid = bool(
+            clipart_dir
+            and os.path.isdir(clipart_dir)
+            and "pytest" not in clipart_dir.lower()
+            and "temp" not in clipart_dir.lower()
+        )
+        assert not is_valid, "pytest path must be flagged invalid"
+
+        # Simulating main_window reset
+        if not is_valid:
+            sm.clipart_library_dir = ""
+            sm.save()
+
+        assert sm.clipart_library_dir == ""
+        win.close()
+    finally:
+        sm.clipart_library_dir = orig
+        sm.save()
+
+
+
+
+

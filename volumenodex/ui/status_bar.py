@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtCore import Qt, Signal, QSize, QTimer
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QLabel, QSlider, QToolButton, QFrame
 )
@@ -37,6 +37,14 @@ class VolumenodexStatusBar(QWidget):
 
         self.lbl_reading_time = QLabel("0.0 min read")
         layout.addWidget(self.lbl_reading_time)
+
+        # Center Status / Notification Message
+        self.lbl_message = QLabel("")
+        self.lbl_message.setStyleSheet("color: #7aa2f7; font-weight: 500; font-size: 11px; padding: 0 4px;")
+        self.lbl_message.hide()
+        layout.addWidget(self.lbl_message)
+
+        self._msg_timer = None
 
         layout.addStretch()
 
@@ -153,3 +161,32 @@ class VolumenodexStatusBar(QWidget):
     def update_daily_goal(self, words: int, goal: int = None) -> None:
         if hasattr(self, "progress_ring"):
             self.progress_ring.set_progress(words, goal)
+
+    def set_message(self, message: str, timeout_ms: int = 4000) -> None:
+        """Displays a temporary notification message in the status bar."""
+        if not message:
+            self._clear_message()
+            return
+
+        self.lbl_message.setText(message)
+        self.lbl_message.show()
+
+        if self._msg_timer is not None:
+            self._msg_timer.stop()
+        else:
+            self._msg_timer = QTimer(self)
+            self._msg_timer.setSingleShot(True)
+            self._msg_timer.timeout.connect(self._clear_message)
+
+        if timeout_ms > 0:
+            self._msg_timer.start(timeout_ms)
+
+    def showMessage(self, message: str, timeout: int = 4000) -> None:
+        """QStatusBar compatibility alias."""
+        self.set_message(message, timeout)
+
+    def _clear_message(self) -> None:
+        if hasattr(self, "lbl_message"):
+            self.lbl_message.clear()
+            self.lbl_message.hide()
+

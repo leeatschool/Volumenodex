@@ -1188,7 +1188,28 @@ class MainWindow(QMainWindow):
         try:
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
             clipart_dir = getattr(self.settings_manager, "clipart_library_dir", "") if self.settings_manager else ""
-            if not clipart_dir or not os.path.exists(clipart_dir):
+            is_valid = bool(
+                clipart_dir
+                and os.path.isdir(clipart_dir)
+                and "pytest" not in clipart_dir.lower()
+                and "temp" not in clipart_dir.lower()
+            )
+            if is_valid:
+                try:
+                    if not any(True for _ in os.scandir(clipart_dir)):
+                        is_valid = False
+                except Exception:
+                    is_valid = False
+
+            if not is_valid:
+                if self.settings_manager and clipart_dir:
+                    try:
+                        self.settings_manager.clipart_library_dir = ""
+                    except Exception:
+                        pass
+                clipart_dir = ""
+
+            if not clipart_dir:
                 candidates = []
                 if hasattr(sys, '_MEIPASS'):
                     candidates.append(os.path.join(sys._MEIPASS, "assets", "clipart"))

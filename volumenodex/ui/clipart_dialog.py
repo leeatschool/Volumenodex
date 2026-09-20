@@ -10,7 +10,7 @@ from PySide6.QtGui import QIcon, QPixmap, QDesktopServices, QColor
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QListWidget, QListWidgetItem, QFileDialog, QFrame, QMessageBox,
-    QLineEdit, QProgressBar
+    QLineEdit, QProgressBar, QStackedWidget
 )
 
 from volumenodex.core.image_utils import load_image, load_pixmap, IMAGE_FILE_FILTER, SUPPORTED_EXTENSIONS
@@ -40,8 +40,11 @@ class ClipArtDialog(QDialog):
 
         self._metadata_cache = ClipartMetadataCache()
         self._load_more_clicks: int = 0
+        self._wikimedia_query_offsets: Dict[str, int] = {}
+        self._wikimedia_seen_titles: set = set()
         self._active_worker: Optional[AutoexpansionWorker] = None
         self._worker_thread: Optional[QThread] = None
+        self._active_index_path: Optional[str] = None
 
         self.setWindowTitle("Insert Clip Art - Volumenodex Library")
         self.resize(860, 640)
@@ -212,7 +215,6 @@ class ClipArtDialog(QDialog):
         self.list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
         self.list_widget.itemSelectionChanged.connect(self._on_selection_changed)
         self.list_widget.verticalScrollBar().valueChanged.connect(self._on_scroll)
-        layout.addWidget(self.list_widget, stretch=1)
 
         # Empty library card banner
         self.empty_card = QFrame()
@@ -245,9 +247,6 @@ class ClipArtDialog(QDialog):
         self.empty_desc.setStyleSheet("color: #a9b1d6; font-size: 12px; line-height: 1.4;")
         self.empty_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_layout.addWidget(self.empty_desc)
-
-        layout.addWidget(self.empty_card)
-        self.empty_card.hide()
 
         # Initial Search Prompt Card (Zero image decoding on open for instant load)
         self.initial_card = QFrame()
@@ -327,8 +326,6 @@ class ClipArtDialog(QDialog):
         btn_browse_all.clicked.connect(self._on_browse_all_clicked)
         init_layout.addWidget(btn_browse_all, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        layout.addWidget(self.initial_card)
-
         # No search results indicator
         self.no_results_card = QFrame()
         self.no_results_card.setStyleSheet("""
@@ -358,8 +355,13 @@ class ClipArtDialog(QDialog):
         btn_reset_filter.setFixedWidth(160)
         no_res_layout.addWidget(btn_reset_filter, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        layout.addWidget(self.no_results_card)
-        self.no_results_card.hide()
+        # Central Stacked Container guaranteeing strictly mutually exclusive views
+        self.stack = QStackedWidget()
+        self.stack.addWidget(self.initial_card)      # index 0: initial welcome
+        self.stack.addWidget(self.empty_card)        # index 1: empty library
+        self.stack.addWidget(self.no_results_card)   # index 2: no matches
+        self.stack.addWidget(self.list_widget)       # index 3: results list
+        layout.addWidget(self.stack, stretch=1)
 
         # "Load More" / Autoexpansion Bar under results
         self.load_more_bar = QHBoxLayout()
@@ -411,14 +413,10 @@ class ClipArtDialog(QDialog):
         self._all_records.clear()
         self.list_widget.clear()
         self._displayed_count = 0
-        self.no_results_card.hide()
         self.btn_load_more.hide()
 
         if not os.path.isdir(self.clipart_dir):
-            if hasattr(self, "initial_card"):
-                self.initial_card.hide()
-            self.empty_card.show()
-            self.list_widget.hide()
+            self._set_display_view("empty")
             self.lbl_stats.setText("0 illustrations")
             return
 
@@ -429,6 +427,7 @@ class ClipArtDialog(QDialog):
         ]
         discovered: List[Dict[str, Any]] = []
         loaded_from_index = False
+        active_idx = None
         for idx_path in index_candidates:
             if idx_path and os.path.exists(idx_path):
                 try:
@@ -442,7 +441,11 @@ class ClipArtDialog(QDialog):
                             raw = item.get("raw", "")
                             cat = item.get("category", "")
                             fname = item.get("filename", os.path.basename(full_p))
-                            search_key = f"{title} {raw} {cat} {fname}".lower()
+                            tags = " ".join(item.get("tags", [])) if isinstance(item.get("tags"), list) else str(item.get("tags", ""))
+                            query_term = item.get("query", "")
+                            desc = item.get("description", "")
+                            attr = item.get("attribution", "")
+                            search_key = f"{title} {raw} {cat} {fname} {tags} {query_term} {desc}".lower()
                             discovered.append({
                                 "path": full_p,
                                 "title": title,
@@ -450,18 +453,29 @@ class ClipArtDialog(QDialog):
                                 "category": cat,
                                 "filename": fname,
                                 "ext": item.get("ext", os.path.splitext(full_p)[1]),
+                                "tags": item.get("tags", []),
+                                "query": query_term,
+                                "description": desc,
+                                "attribution": attr,
                                 "_search_key": search_key,
                             })
                         loaded_from_index = True
+                        active_idx = idx_path
                         break
                 except Exception:
                     pass
 
-        if not loaded_from_index:
+        self._active_index_path = active_idx or os.path.join(self.clipart_dir, "clipart_index.json")
+
+        # In addition to cached index items, ALWAYS scan disk for unindexed or newly downloaded files
+        indexed_filenames = {rec["filename"].lower() for rec in discovered}
+        new_on_disk: List[Dict[str, Any]] = []
+
+        try:
             for root, _, files in os.walk(self.clipart_dir):
-                for f in sorted(files):
+                for f in files:
                     ext = os.path.splitext(f)[1].lower()
-                    if ext in self.SUPPORTED_EXTENSIONS:
+                    if ext in self.SUPPORTED_EXTENSIONS and f.lower() not in indexed_filenames:
                         full_p = os.path.join(root, f)
                         raw_title, _ = os.path.splitext(f)
                         clean_title = raw_title.replace("_", " ").replace("-", " ").strip().title()
@@ -469,7 +483,7 @@ class ClipArtDialog(QDialog):
                         cat = "" if rel_dir == "." else rel_dir.replace("\\", " / ")
                         search_key = f"{clean_title} {raw_title} {cat} {f}".lower()
 
-                        discovered.append({
+                        rec = {
                             "path": full_p,
                             "title": clean_title,
                             "raw": raw_title,
@@ -477,41 +491,63 @@ class ClipArtDialog(QDialog):
                             "filename": f,
                             "ext": ext,
                             "_search_key": search_key,
-                        })
+                        }
+                        discovered.append(rec)
+                        new_on_disk.append(rec)
+                        indexed_filenames.add(f.lower())
+        except Exception:
+            pass
+
+        if new_on_disk and self._active_index_path:
+            self._save_records_to_index(new_on_disk)
 
         self._all_records = discovered
         self._indexed_items = discovered
+        for rec in discovered:
+            t = rec.get("title")
+            if t:
+                self._wikimedia_seen_titles.add(t.lower())
+            fn = rec.get("filename")
+            if fn:
+                self._wikimedia_seen_titles.add(os.path.splitext(fn)[0].lower())
+
         total = len(discovered)
         if total == 0:
-            if hasattr(self, "initial_card"):
-                self.initial_card.hide()
-            self.empty_card.show()
-            self.list_widget.hide()
+            self._set_display_view("empty")
             self.btn_insert.setEnabled(False)
             self.lbl_stats.setText("0 illustrations")
             return
 
-        self.empty_card.hide()
-        self.list_widget.hide()
-        if hasattr(self, "initial_card"):
-            self.initial_card.show()
+        self._set_display_view("initial")
         self.btn_insert.setEnabled(False)
         self.lbl_stats.setText(f"{total:,} illustrations ready to search")
+
+    def _set_display_view(self, mode: str) -> None:
+        """Sets the active content view ('initial', 'empty', 'no_results', 'list') strictly mutually exclusive via QStackedWidget."""
+        if hasattr(self, "stack"):
+            if mode == "initial":
+                self.stack.setCurrentWidget(self.initial_card)
+            elif mode == "empty":
+                self.stack.setCurrentWidget(self.empty_card)
+            elif mode == "no_results":
+                self.stack.setCurrentWidget(self.no_results_card)
+            elif mode == "list":
+                self.stack.setCurrentWidget(self.list_widget)
 
     _load_library = _scan_library_files
 
     def _on_browse_all_clicked(self) -> None:
         """Renders library illustrations on demand when explicitly requested."""
-        if hasattr(self, "initial_card"):
-            self.initial_card.hide()
-        self.no_results_card.hide()
-        self.list_widget.show()
+        self._set_display_view("list")
         self._current_matches = self._all_records
         self.list_widget.clear()
         self._displayed_count = 0
         self._render_match_batch(self._batch_size)
         total = len(self._all_records)
         self.lbl_stats.setText(f"Showing {min(self._displayed_count, total)} of {total:,} illustrations")
+        self.btn_load_more.show()
+        self.btn_load_more.setEnabled(True)
+        self.btn_load_more.setText("✨ Not what you're looking for? Load more!")
 
     def _on_search_text_changed(self, text: str) -> None:
         """Restores initial welcome card when the user completely clears the search input."""
@@ -528,10 +564,7 @@ class ClipArtDialog(QDialog):
     def _show_initial_card(self) -> None:
         """Restores the zero-decode welcome card interface."""
         self.list_widget.clear()
-        self.list_widget.hide()
-        self.no_results_card.hide()
-        if hasattr(self, "initial_card"):
-            self.initial_card.show()
+        self._set_display_view("initial")
         self.btn_load_more.hide()
         self.btn_insert.setEnabled(False)
         total = len(self._all_records)
@@ -543,8 +576,9 @@ class ClipArtDialog(QDialog):
         self._execute_search()
 
     def _execute_search(self) -> None:
-        """Executes ultra-fast in-memory lookup table search (<15ms across 20,500+ items)."""
-        query = self.search_input.text().strip().lower()
+        """Executes ultra-fast in-memory lookup table search (<15ms across 20,500+ items) and autoexpands from Wikimedia if empty."""
+        raw_query = self.search_input.text().strip()
+        query = raw_query.lower()
         self._load_more_clicks = 0
 
         # When no query is entered: restore initial card with zero image decoding
@@ -556,8 +590,6 @@ class ClipArtDialog(QDialog):
 
         self.list_widget.clear()
         self._displayed_count = 0
-        if hasattr(self, "initial_card"):
-            self.initial_card.hide()
 
         # Pure in-memory lookup search: zero disk I/O, zero PIL decodes
         matches = [
@@ -568,22 +600,23 @@ class ClipArtDialog(QDialog):
         self._current_matches = matches
         total_matches = len(self._current_matches)
 
+        # Always make sure "Not what you're looking for? Load more!" is visible when searching
+        self.btn_load_more.show()
+        self.btn_load_more.setEnabled(True)
+        self.btn_load_more.setText("✨ Not what you're looking for? Load more!")
+
         if total_matches == 0:
-            self.list_widget.hide()
-            self.lbl_no_results.setText(f"No clip art matches \"{self.search_input.text().strip()}\"")
-            self.no_results_card.show()
+            self._set_display_view("no_results")
+            self.lbl_no_results.setText(f"No local clip art matches \"{raw_query}\". Searching Wikimedia Commons...")
             self.btn_insert.setEnabled(False)
-            self.lbl_stats.setText(f"0 matches for \"{query}\" (from {len(self._all_records):,} in library)")
-            self.btn_load_more.show()
+            self.lbl_stats.setText(f"0 local matches for \"{raw_query}\" — searching Wikimedia Commons...")
+            # Automatically query Wikimedia Commons for terms not in local database!
+            offset = self._wikimedia_query_offsets.get(query, 0)
+            self._trigger_autoexpansion(raw_query, offset=offset, max_images=6)
         else:
-            self.list_widget.show()
-            self.no_results_card.hide()
+            self._set_display_view("list")
             self._render_match_batch(self._batch_size)
             self.lbl_stats.setText(f"Showing {min(self._displayed_count, total_matches)} of {total_matches} matches (from {len(self._all_records):,} in library)")
-            if total_matches > self._displayed_count or total_matches < 3:
-                self.btn_load_more.show()
-            else:
-                self.btn_load_more.hide()
 
     _run_filter = _execute_search
 
@@ -629,6 +662,7 @@ class ClipArtDialog(QDialog):
             item.setData(Qt.ItemDataRole.UserRole, full_path)
             item.setData(Qt.ItemDataRole.UserRole + 1, clean_title)
             item.setData(Qt.ItemDataRole.UserRole + 2, category)
+            item.setData(Qt.ItemDataRole.UserRole + 4, rec.get("attribution", ""))
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
 
             try:
@@ -644,9 +678,9 @@ class ClipArtDialog(QDialog):
         self._displayed_count = end_idx
         self._on_selection_changed()
 
-    def _trigger_autoexpansion(self, query: str, offset: int = 0, max_images: int = 5) -> None:
+    def _trigger_autoexpansion(self, query: str, offset: Optional[int] = None, max_images: int = 6) -> None:
         """Starts a background worker to query Wikimedia Commons."""
-        autoexp_enabled = False
+        autoexp_enabled = True
         size_mode = "500px"
         limit_val = 2.0
         limit_unit = "GB"
@@ -669,8 +703,23 @@ class ClipArtDialog(QDialog):
         if self._worker_thread and self._worker_thread.isRunning():
             return
 
+        q_key = query.strip().lower()
+        if offset is None:
+            offset = self._wikimedia_query_offsets.get(q_key, 0)
+
         self.frame_expansion.show()
         self.lbl_expansion_status.setText(f"Searching Wikimedia Commons for '{query}'...")
+        self.progress_expansion.setRange(0, 0)
+
+        # Collect all seen titles and filenames to guarantee zero duplicate downloads
+        seen = set(self._wikimedia_seen_titles)
+        for rec in self._all_records:
+            t = rec.get("title")
+            if t:
+                seen.add(t.lower())
+            fn = rec.get("filename")
+            if fn:
+                seen.add(os.path.splitext(fn)[0].lower())
 
         self._worker_thread = QThread(self)
         self._active_worker = AutoexpansionWorker(
@@ -683,7 +732,8 @@ class ClipArtDialog(QDialog):
             allow_cc_by=cc_by,
             allow_cc_by_sa=cc_by_sa,
             limit_val=limit_val,
-            limit_unit=limit_unit
+            limit_unit=limit_unit,
+            seen_titles=seen,
         )
         self._active_worker.moveToThread(self._worker_thread)
         self._worker_thread.started.connect(self._active_worker.run)
@@ -694,19 +744,61 @@ class ClipArtDialog(QDialog):
         self._worker_thread.start()
 
     def _on_load_more_clicked(self) -> None:
-        """Pagination logic: ignores first 3 images on first click, then increments ignored images by 5 (3 + 5*n)."""
+        """Queries Wikimedia Commons for the next batch of unique illustrations with zero repeats."""
         query = self.search_input.text().strip()
         if not query:
             return
 
         self._load_more_clicks += 1
-        # Click 1: offset = 3; Click 2: offset = 3 + 5*1 = 8; Click 3: offset = 3 + 5*2 = 13
-        offset = 3 + 5 * (self._load_more_clicks - 1)
-        self._trigger_autoexpansion(query, offset=offset, max_images=5)
+        offset = self._wikimedia_query_offsets.get(query.lower(), 0)
+        self.btn_load_more.setEnabled(False)
+        self.btn_load_more.setText("⏳ Loading more from Wikimedia Commons...")
+        self._trigger_autoexpansion(query, offset=offset, max_images=6)
+
+    def _save_records_to_index(self, records: List[Dict[str, Any]]) -> None:
+        """Permanently appends newly downloaded or discovered illustrations into clipart_index.json."""
+        if not self._active_index_path or not records:
+            return
+        try:
+            items = []
+            if os.path.exists(self._active_index_path):
+                with open(self._active_index_path, "r", encoding="utf-8") as f:
+                    items = json.load(f)
+            existing_rels = {it.get("rel") for it in items}
+            added = False
+            for rec in records:
+                try:
+                    rel = os.path.relpath(rec["path"], self.clipart_dir)
+                except ValueError:
+                    rel = os.path.basename(rec["path"])
+                if rel not in existing_rels:
+                    items.append({
+                        "rel": rel,
+                        "title": rec.get("title", ""),
+                        "raw": rec.get("raw", ""),
+                        "category": rec.get("category", ""),
+                        "filename": rec.get("filename", os.path.basename(rec["path"])),
+                        "ext": rec.get("ext", os.path.splitext(rec["path"])[1].lower()),
+                        "query": rec.get("query", ""),
+                        "tags": rec.get("tags", []),
+                        "description": rec.get("description", ""),
+                        "attribution": rec.get("attribution", ""),
+                    })
+                    existing_rels.add(rel)
+                    added = True
+            if added:
+                os.makedirs(os.path.dirname(os.path.abspath(self._active_index_path)), exist_ok=True)
+                with open(self._active_index_path, "w", encoding="utf-8") as f:
+                    json.dump(items, f, ensure_ascii=False)
+        except Exception:
+            pass
 
     def _on_autoexpansion_image_downloaded(self, file_path: str, meta: dict) -> None:
-        """Adds newly downloaded illustration to the list widget in real time."""
+        """Adds newly downloaded illustration to the list widget and matches in real time."""
         clean_title = meta.get("title", os.path.splitext(os.path.basename(file_path))[0])
+        self._wikimedia_seen_titles.add(clean_title.lower())
+        self._wikimedia_seen_titles.add(os.path.splitext(os.path.basename(file_path))[0].lower())
+
         pix = load_pixmap(file_path)
         icon = QIcon(pix.scaled(96, 96, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)) if (pix and not pix.isNull()) else QIcon()
 
@@ -724,31 +816,59 @@ class ClipArtDialog(QDialog):
         attr_str = f"Attribution: {meta.get('attribution')}\n" if meta.get("attribution") else ""
         item.setToolTip(f"{clean_title}\n{lic_str}{attr_str}Resolution: {dims}\nFormat: JXL\nSize: {size_kb:.1f} KB")
 
-        self.list_widget.show()
-        self.no_results_card.hide()
+        self._set_display_view("list")
         self.list_widget.insertItem(0, item)
         item.setSelected(True)
+        self.btn_insert.setEnabled(True)
 
-        # Record in in-memory list and metadata cache
+        current_q = self.search_input.text().strip().lower()
+        raw_name = os.path.splitext(os.path.basename(file_path))[0]
+        desc = meta.get("description", "")
+        attr = meta.get("attribution", "")
         rec = {
             "path": file_path,
             "title": clean_title,
-            "raw": clean_title,
+            "raw": raw_name,
             "category": "Wikimedia Commons",
             "filename": os.path.basename(file_path),
-            "ext": ".jxl"
+            "ext": os.path.splitext(file_path)[1].lower(),
+            "query": current_q,
+            "tags": [current_q] if current_q else [],
+            "description": desc,
+            "attribution": attr,
+            "_search_key": f"{clean_title.lower()} {raw_name.lower()} wikimedia commons {current_q} {os.path.basename(file_path).lower()} {desc.lower()}",
         }
         self._all_records.insert(0, rec)
+        self._current_matches.insert(0, rec)
+        self._displayed_count += 1
         self._metadata_cache.get_metadata(file_path)
-        self.lbl_stats.setText(f"{len(self._all_records):,} illustrations in library")
+        self.lbl_stats.setText(f"Showing {len(self._current_matches)} matches ({len(self._all_records):,} in library)")
+        self._save_records_to_index([rec])
 
-    def _on_autoexpansion_finished(self, count: int) -> None:
+    def _on_autoexpansion_finished(self, count: int, next_offset: int = 0) -> None:
+        query = self.search_input.text().strip().lower()
+        if query:
+            self._wikimedia_query_offsets[query] = next_offset
+
+        self.btn_load_more.setEnabled(True)
+        self.btn_load_more.setText("✨ Not what you're looking for? Load more!")
+        self.btn_load_more.show()
+
         if self._worker_thread:
             self._worker_thread.quit()
             self._worker_thread.wait()
             self._worker_thread = None
         self._active_worker = None
-        self.frame_expansion.hide()
+
+        if count > 0:
+            self.lbl_expansion_status.setText(f"✓ Added {count} new illustrations from Wikimedia Commons.")
+            QTimer.singleShot(4000, lambda: self.frame_expansion.hide() if not (self._worker_thread and self._worker_thread.isRunning()) else None)
+        else:
+            if len(self._current_matches) == 0:
+                self.lbl_no_results.setText(f"No illustrations found for \"{self.search_input.text().strip()}\" locally or on Wikimedia Commons.")
+                self._set_display_view("no_results")
+            self.lbl_expansion_status.setText(f"No further new illustrations found for '{query}'.")
+            QTimer.singleShot(4000, lambda: self.frame_expansion.hide() if not (self._worker_thread and self._worker_thread.isRunning()) else None)
         self._metadata_cache.save()
 
     def _on_storage_limit_exceeded(self, cur_gb: float, limit_gb: float) -> None:

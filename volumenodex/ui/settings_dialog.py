@@ -4,11 +4,12 @@ Provides an intuitive Fluent interface to customize variable auto-save intervals
 default document modes, canvas visual cues, and studio behavior.
 """
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QFont, QDesktopServices
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox,
-    QComboBox, QPushButton, QFrame, QGroupBox
+    QComboBox, QPushButton, QFrame, QGroupBox, QScrollArea, QWidget,
+    QLineEdit, QFileDialog, QDoubleSpinBox, QSpinBox
 )
 
 from volumenodex.core.settings_manager import SettingsManager
@@ -22,7 +23,8 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.settings_manager = settings_manager
         self.setWindowTitle("Studio Settings & Preferences — Volumenodex")
-        self.setFixedWidth(520)
+        self.resize(560, 600)
+        self.setMinimumSize(480, 360)
         self.setStyleSheet("""
             QDialog {
                 background-color: #1a1b26;
@@ -30,6 +32,38 @@ class SettingsDialog(QDialog):
             }
             QLabel {
                 color: #c0caf5;
+            }
+            QScrollArea {
+                background-color: transparent;
+                border: none;
+            }
+            QScrollBar:vertical {
+                background-color: #16161e;
+                width: 10px;
+                margin: 0px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #3b4261;
+                min-height: 24px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #7aa2f7;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QLineEdit {
+                background-color: #16161e;
+                color: #c0caf5;
+                border: 1px solid #292e42;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 12px;
+            }
+            QLineEdit:focus {
+                border-color: #7aa2f7;
             }
             QGroupBox {
                 background-color: #1f2335;
@@ -89,8 +123,21 @@ class SettingsDialog(QDialog):
             }
         """)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 22, 24, 22)
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
+
+        # Scrollable Settings Container
+        self.scroll_area = QScrollArea(self)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+
+        container = QWidget()
+        container.setStyleSheet("background-color: #1a1b26;")
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(14)
 
         # Header Title
@@ -317,14 +364,96 @@ class SettingsDialog(QDialog):
         self.chk_cc_by_sa.setChecked(self.settings_manager.clipart_license_cc_by_sa)
         v_clipart.addWidget(self.chk_cc_by_sa)
 
+        # Clipart Library Folder row
+        lbl_dir = QLabel("Clipart Library Folder:", self.grp_autoexpansion)
+        lbl_dir.setStyleSheet("color: #9aa5ce; font-size: 12px;")
+        v_clipart.addWidget(lbl_dir)
+
+        h_dir_input = QHBoxLayout()
+        h_dir_input.setSpacing(6)
+        self.txt_clipart_dir = QLineEdit(self.grp_autoexpansion)
+        self.txt_clipart_dir.setText(self.settings_manager.clipart_library_dir or "")
+        self.txt_clipart_dir.setPlaceholderText("Default bundled library folder (assets/clipart)")
+        h_dir_input.addWidget(self.txt_clipart_dir, stretch=1)
+
+        btn_browse_dir = QPushButton("📁 Browse...", self.grp_autoexpansion)
+        btn_browse_dir.setStyleSheet("""
+            QPushButton {
+                background-color: #24283b;
+                color: #c0caf5;
+                border: 1px solid #3b4261;
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background-color: #2e344e; color: #ffffff; border-color: #7aa2f7; }
+        """)
+        btn_browse_dir.clicked.connect(self._on_browse_clipart_dir)
+        h_dir_input.addWidget(btn_browse_dir)
+
+        btn_open_curr_dir = QPushButton("📂 Open", self.grp_autoexpansion)
+        btn_open_curr_dir.setToolTip("Open this clipart folder in Windows File Explorer")
+        btn_open_curr_dir.setStyleSheet("""
+            QPushButton {
+                background-color: #24283b;
+                color: #c0caf5;
+                border: 1px solid #3b4261;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 11px;
+            }
+            QPushButton:hover { background-color: #2e344e; color: #ffffff; border-color: #7aa2f7; }
+        """)
+        btn_open_curr_dir.clicked.connect(self._on_open_clipart_dir)
+        h_dir_input.addWidget(btn_open_curr_dir)
+
+        btn_reset_dir = QPushButton("↺", self.grp_autoexpansion)
+        btn_reset_dir.setToolTip("Reset to default library folder")
+        btn_reset_dir.setStyleSheet("""
+            QPushButton {
+                background-color: #24283b;
+                color: #c0caf5;
+                border: 1px solid #3b4261;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 12px;
+            }
+            QPushButton:hover { background-color: #2e344e; color: #ffffff; border-color: #7aa2f7; }
+        """)
+        btn_reset_dir.clicked.connect(lambda: self.txt_clipart_dir.setText(""))
+        h_dir_input.addWidget(btn_reset_dir)
+
+        v_clipart.addLayout(h_dir_input)
+
+        lbl_dir_note = QLabel(
+            "Downloaded Wikimedia illustrations and custom graphics are permanently saved to this folder for future use.",
+            self.grp_autoexpansion
+        )
+        lbl_dir_note.setWordWrap(True)
+        lbl_dir_note.setStyleSheet("color: #565f89; font-size: 10px; line-height: 1.3;")
+        v_clipart.addWidget(lbl_dir_note)
+
         layout.addWidget(self.grp_autoexpansion)
 
-        # Buttons
-        layout.addSpacing(8)
-        btn_layout = QHBoxLayout()
+        # Set scroll container widget and add to root layout
+        self.scroll_area.setWidget(container)
+        root_layout.addWidget(self.scroll_area, stretch=1)
+
+        # Sticky Footer Buttons bar (always visible at bottom)
+        bottom_bar = QFrame(self)
+        bottom_bar.setStyleSheet("""
+            QFrame {
+                background-color: #16161e;
+                border-top: 1px solid #292e42;
+            }
+        """)
+        btn_layout = QHBoxLayout(bottom_bar)
+        btn_layout.setContentsMargins(24, 12, 24, 12)
+        btn_layout.setSpacing(10)
         btn_layout.addStretch()
 
-        btn_cancel = QPushButton("Cancel", self)
+        btn_cancel = QPushButton("Cancel", bottom_bar)
         btn_cancel.setStyleSheet("""
             QPushButton {
                 background-color: #24283b;
@@ -339,7 +468,7 @@ class SettingsDialog(QDialog):
         btn_cancel.clicked.connect(self.reject)
         btn_layout.addWidget(btn_cancel)
 
-        btn_save = QPushButton("Save Preferences", self)
+        btn_save = QPushButton("Save Preferences", bottom_bar)
         btn_save.setDefault(True)
         btn_save.setStyleSheet("""
             QPushButton {
@@ -355,10 +484,26 @@ class SettingsDialog(QDialog):
         btn_save.clicked.connect(self._on_save_clicked)
         btn_layout.addWidget(btn_save)
 
-        layout.addLayout(btn_layout)
+        root_layout.addWidget(bottom_bar)
+
+    def _on_browse_clipart_dir(self) -> None:
+        """Opens directory picker to choose custom clipart library folder."""
+        import os
+        start_dir = self.txt_clipart_dir.text().strip() or os.path.expanduser("~/Pictures")
+        chosen = QFileDialog.getExistingDirectory(self, "Select Clipart Library Folder", start_dir)
+        if chosen:
+            self.txt_clipart_dir.setText(os.path.normpath(chosen))
+
+    def _on_open_clipart_dir(self) -> None:
+        """Opens the currently configured clipart folder in Windows File Explorer."""
+        import os
+        d = self.txt_clipart_dir.text().strip()
+        if not d or not os.path.exists(d):
+            d = os.path.expanduser("~/Pictures")
+        QDesktopServices.openUrl(QUrl.fromLocalFile(d))
 
     def highlight_autoexpansion_limit(self) -> None:
-        """Visually highlights the autoexpansion storage limit controls when space is exceeded."""
+        """Visually highlights the autoexpansion storage limit controls and scrolls to them."""
         self.grp_autoexpansion.setStyleSheet("""
             QGroupBox {
                 background-color: #1f2335;
@@ -379,6 +524,7 @@ class SettingsDialog(QDialog):
                 padding: 4px 8px;
             }
         """)
+        self.scroll_area.ensureWidgetVisible(self.grp_autoexpansion)
         self.spin_limit_val.setFocus()
 
     def _on_autosave_toggle(self, checked: bool) -> None:
@@ -392,7 +538,8 @@ class SettingsDialog(QDialog):
         self.settings_manager.auto_open_recent = self.chk_auto_open_recent.isChecked()
         self.settings_manager.daily_word_goal = self.spin_daily_goal.value()
 
-        # Clipart Autoexpansion settings
+        # Clipart Library & Autoexpansion settings
+        self.settings_manager.clipart_library_dir = self.txt_clipart_dir.text().strip()
         self.settings_manager.clipart_autoexpansion_enabled = self.chk_autoexpansion_enable.isChecked()
         self.settings_manager.clipart_autoexpansion_size = str(self.combo_autoexpansion_size.currentData())
         self.settings_manager.clipart_size_limit_val = self.spin_limit_val.value()

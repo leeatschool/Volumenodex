@@ -1,6 +1,6 @@
 ; Script generated for Inno Setup 6
 #define MyAppName "Volumenodex"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "2.1.0"
 #define MyAppPublisher "Volumenodex"
 #define MyAppURL "https://github.com/leeatschool/Volumenodex"
 #define MyAppExeName "Volumenodex.exe"
@@ -17,7 +17,7 @@ DefaultDirName={localappdata}\Programs\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=.
-OutputBaseFilename=Volumenodex-v2.0.0-Setup
+OutputBaseFilename=Volumenodex-v2.1.0-Setup
 SetupIconFile=assets\app_icon.ico
 Compression=lzma2/max
 SolidCompression=yes

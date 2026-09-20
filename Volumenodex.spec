@@ -20,6 +20,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('assets', 'assets'),
+        ('assets/app_icon.ico', '.'),
         ('volumenodex/reference/bundled_knowledge.json', 'volumenodex/reference'),
         ('volumenodex/resources', 'volumenodex/resources'),
     ] + collect_data_files('spellchecker'),
@@ -71,8 +72,8 @@ if sys.platform == 'darwin':
         info_plist={
             'CFBundleName': 'Volumenodex',
             'CFBundleDisplayName': 'Volumenodex Word Studio',
-            'CFBundleVersion': '2.0.0',
-            'CFBundleShortVersionString': '2.0.0',
+            'CFBundleVersion': '2.1.0',
+            'CFBundleShortVersionString': '2.1.0',
             'NSPrincipalClass': 'NSApplication',
             'NSHighResolutionCapable': 'True',
         },

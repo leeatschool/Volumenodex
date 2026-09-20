@@ -241,3 +241,33 @@ def test_autosave_draft_recovery_for_untitled(app):
     assert os.path.exists(recovery_path), "Recovery draft file must be written for untitled document"
     assert "Draft Saved" in win.ribbon.lbl_autosave_badge.text()
     win.close()
+
+
+def test_settings_dialog_scroll_area_and_clipart_dir(app, tmp_path):
+    """Verify SettingsDialog incorporates a QScrollArea for small screen accessibility and manages clipart folder."""
+    from PySide6.QtWidgets import QScrollArea
+    sm = SettingsManager()
+    orig_clipart = sm.clipart_library_dir
+    try:
+        dlg = SettingsDialog(sm)
+        dlg.show()
+
+        # Verify scroll area is present and holds content
+        assert hasattr(dlg, "scroll_area")
+        assert isinstance(dlg.scroll_area, QScrollArea)
+        assert dlg.scroll_area.widget() is not None
+
+        # Verify Clipart Library Folder input exists
+        assert hasattr(dlg, "txt_clipart_dir")
+        test_clipart_path = str(tmp_path / "MyCustomClipart")
+        os.makedirs(test_clipart_path, exist_ok=True)
+        dlg.txt_clipart_dir.setText(test_clipart_path)
+
+        # Save preferences
+        dlg._on_save_clicked()
+        assert sm.clipart_library_dir == test_clipart_path
+
+        dlg.close()
+    finally:
+        sm.clipart_library_dir = orig_clipart
+        sm.save()

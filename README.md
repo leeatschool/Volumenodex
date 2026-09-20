@@ -71,15 +71,27 @@
 
 ---
 
+### 🌟 What's New in Version 2.1.0
+
+* **Direct Magnifying Glass & Enter-Triggered Search**: Replaced real-time per-character parsing with an instant-response search bar triggered solely upon pressing `Enter` or clicking the interactive magnifying glass button, ensuring fluid, zero-lag query execution across tens of thousands of catalog items.
+* **Canvas Interactive Image Selection & Corner Anchors**: Clicking any illustration or image in the manuscript displays an interactive selection border with four live draggable corner anchors (`TopLeft`, `TopRight`, `BottomLeft`, `BottomRight`) and an on-canvas floating options bar (`Crop`, `Resize`, `Align Left/Center/Right`, `Wrap/Inline`, `Delete`).
+* **Persistent Wikimedia Commons Autoexpansion & Indexing**: Automatic background retrieval of high-resolution educational and public-domain illustrations. Downloaded images are immediately saved to disk (`.jxl` or `.png`) and indexed into `clipart_index.json` with search tags and metadata so future searches load instantly offline without re-grabbing.
+* **Zero-Duplicate Retrieval Pipeline**: Advanced deduplication tracking prevents repeat downloads or duplicate thumbnails across consecutive searches and pagination passes.
+* **Mutually Exclusive Display Architecture (`QStackedWidget`)**: Streamlined clipart dialog view modes into a cleanly isolated stack layout, eliminating card overlaps and visual glitches.
+* **Responsive Settings Dialog**: Added a styled vertical scroll area and sticky bottom action bar to accommodate smaller screen resolutions, plus an integrated Clipart Library Folder path picker (`Browse`, `Open`, `Reset`).
+* **Multi-Resolution Desktop & Taskbar Icons**: Hardened native Win32 icon loading and shortcut properties to guarantee crisp multi-resolution rendering across all Windows desktop scaling factors.
+
+---
+
 ## 🚀 Cross-Platform Downloads & Installation
 
 Pre-compiled standalone binary packages for each operating system are available on the [Releases Page](https://github.com/leeatschool/Volumenodex/releases):
 
 | Platform | Package | Description |
 | :--- | :--- | :--- |
-| **Windows x64** | `Volumenodex-v2.0.0-Windows-x64.zip` | Standalone portable zip containing `Volumenodex.exe` and full clipart library |
-| **macOS** | `Volumenodex-v2.0.0-macOS.dmg` / `.zip` | Drag-and-drop macOS universal application bundle (`Volumenodex.app`) |
-| **Linux x86_64** | `Volumenodex-v2.0.0-Linux-x86_64.tar.gz` | Portable distribution with `run.sh` script and desktop entry integration |
+| **Windows x64** | `Volumenodex-v2.1.0-Windows-x64.zip` | Standalone portable zip containing `Volumenodex.exe` and full clipart library |
+| **macOS** | `Volumenodex-v2.1.0-macOS.dmg` / `.zip` | Drag-and-drop macOS universal application bundle (`Volumenodex.app`) |
+| **Linux x86_64** | `Volumenodex-v2.1.0-Linux-x86_64.tar.gz` | Portable distribution with `run.sh` script and desktop entry integration |
 
 ---
 
@@ -130,6 +142,6 @@ Volumenodex utilizes a GitHub Actions automated workflow (`.github/workflows/bui
 
 ## 📄 License & Status
 
-**Version**: `2.0.0`  
+**Version**: `2.1.0`  
 **Status**: Production Release  
 Copyright © 2026. All rights reserved.

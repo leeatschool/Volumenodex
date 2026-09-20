@@ -19,12 +19,17 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QObject, Signal, QThread
 
+try:
+    import pillow_jxl  # noqa: F401
+except ImportError:
+    pass
+
 from volumenodex.core.image_utils import load_image, save_image
 
 logger = logging.getLogger("volumenodex.clipart.autoexpansion")
 
 DEFAULT_USER_AGENT = (
-    "Volumenodex/2.0.0 "
+    "Volumenodex/2.1.0 "
     "(https://github.com/leeatschool/Volumenodex; contact: studio@volumenodex.local) "
     "Python-urllib"
 )
@@ -138,7 +143,7 @@ class AutoexpansionWorker(QObject):
     """Background worker that queries Wikimedia Commons and saves images directly into the library."""
 
     imageDownloaded = Signal(str, dict)  # (file_path, metadata_dict)
-    downloadFinished = Signal(int)       # count of newly downloaded images
+    downloadFinished = Signal(int, int)  # (downloaded_count, next_offset)
     storageLimitExceeded = Signal(float, float)  # (current_gb, limit_gb)
     statusMessage = Signal(str)
 
@@ -154,6 +159,7 @@ class AutoexpansionWorker(QObject):
         allow_cc_by_sa: bool = False,
         limit_val: float = 2.0,
         limit_unit: str = "GB",
+        seen_titles: Optional[set] = None,
         parent=None
     ):
         super().__init__(parent)
@@ -167,6 +173,7 @@ class AutoexpansionWorker(QObject):
         self.allow_cc_by_sa = allow_cc_by_sa
         self.limit_val = limit_val
         self.limit_unit = limit_unit
+        self.seen_titles: set = set(t.lower() for t in seen_titles) if seen_titles else set()
         self._cancel_event = threading.Event()
 
     def cancel(self) -> None:
@@ -175,7 +182,7 @@ class AutoexpansionWorker(QObject):
     def run(self) -> None:
         """Executes the autoexpansion query."""
         if not self.query:
-            self.downloadFinished.emit(0)
+            self.downloadFinished.emit(0, self.offset)
             return
 
         # 1. Storage limit check
@@ -184,7 +191,7 @@ class AutoexpansionWorker(QObject):
         )
         if exceeded:
             self.storageLimitExceeded.emit(cur_gb, limit_gb)
-            self.downloadFinished.emit(0)
+            self.downloadFinished.emit(0, self.offset)
             return
 
         os.makedirs(self.destination_dir, exist_ok=True)
@@ -198,6 +205,8 @@ class AutoexpansionWorker(QObject):
             target_width = None
 
         downloaded_count = 0
+        current_offset = self.offset
+        next_offset = self.offset
 
         try:
             # Build API query params
@@ -208,8 +217,8 @@ class AutoexpansionWorker(QObject):
                 "generator": "search",
                 "gsrsearch": self.query,
                 "gsrnamespace": 6,  # File namespace
-                "gsrlimit": min(30, max(15, self.max_images + 5)),
-                "gsroffset": self.offset,
+                "gsrlimit": min(50, max(30, self.max_images * 5)),
+                "gsroffset": current_offset,
                 "prop": "imageinfo",
                 "iiprop": "url|size|mime|extmetadata",
             }
@@ -221,7 +230,7 @@ class AutoexpansionWorker(QObject):
 
             _global_rate_limiter.wait(self._cancel_event)
             if self._cancel_event.is_set():
-                self.downloadFinished.emit(0)
+                self.downloadFinished.emit(0, current_offset)
                 return
 
             with urllib.request.urlopen(req, timeout=12) as resp:
@@ -229,6 +238,16 @@ class AutoexpansionWorker(QObject):
 
             pages = data.get("query", {}).get("pages", {})
             candidates = sorted(pages.values(), key=lambda p: p.get("index", 999999))
+
+            # Determine next offset from Wikimedia's continue token
+            continue_data = data.get("continue", {})
+            if "gsroffset" in continue_data:
+                try:
+                    next_offset = int(continue_data["gsroffset"])
+                except (ValueError, TypeError):
+                    next_offset = current_offset + len(candidates)
+            else:
+                next_offset = current_offset + len(candidates)
 
             for page in candidates:
                 if self._cancel_event.is_set() or downloaded_count >= self.max_images:
@@ -277,15 +296,40 @@ class AutoexpansionWorker(QObject):
                 clean_title = os.path.splitext(clean_title)[0]
                 safe_name = re.sub(r'[\\/:*?"<>|]', "_", clean_title).strip()
                 if not safe_name:
-                    safe_name = f"{self.query}_{self.offset + downloaded_count + 1}"
+                    safe_name = f"{self.query}_{current_offset + downloaded_count + 1}"
 
-                # Target file path (stored as JXL)
+                # ZERO REPEAT DEDUPLICATION:
+                # 1. Skip if title or safe_name was already seen in library or downloaded this session
+                norm_titles = {
+                    safe_name.lower(),
+                    clean_title.lower(),
+                    safe_name.lower().replace(" ", "_"),
+                    safe_name.lower().replace("_", " "),
+                    clean_title.lower().replace(" ", "_"),
+                    clean_title.lower().replace("_", " "),
+                }
+                if any(t in self.seen_titles for t in norm_titles):
+                    continue
+
+                # 2. Skip if file already exists in library destination folder (.jxl or other format)
+                possible_stems = {safe_name, safe_name.replace(" ", "_"), safe_name.replace("_", " ")}
+                already_exists = False
+                for stem in possible_stems:
+                    for chk_ext in (".jxl", ".png", ".jpg", ".jpeg", ".webp", ".svg", ".bmp", ".gif"):
+                        if os.path.exists(os.path.join(self.destination_dir, f"{stem}{chk_ext}")):
+                            already_exists = True
+                            break
+                    if already_exists:
+                        break
+
+                if already_exists:
+                    self.seen_titles.update(norm_titles)
+                    continue
+
                 target_path = os.path.join(self.destination_dir, f"{safe_name}.jxl")
-                # Deduplicate name if file exists
-                counter = 1
-                while os.path.exists(target_path):
-                    target_path = os.path.join(self.destination_dir, f"{safe_name}_{counter}.jxl")
-                    counter += 1
+
+                # Mark as seen immediately to avoid race conditions
+                self.seen_titles.update(norm_titles)
 
                 # Rate limit before image download
                 _global_rate_limiter.wait(self._cancel_event)
@@ -303,7 +347,13 @@ class AutoexpansionWorker(QObject):
                 if qimg.isNull():
                     continue
 
-                save_image(qimg, target_path)
+                saved = save_image(qimg, target_path)
+                if not saved or not os.path.exists(target_path):
+                    alt_path = os.path.join(self.destination_dir, f"{safe_name}.png")
+                    if qimg.save(alt_path, "PNG"):
+                        target_path = alt_path
+                    else:
+                        continue
 
                 # Extract metadata details
                 artist_raw = ext.get("Artist", {}).get("value", "")
@@ -327,4 +377,4 @@ class AutoexpansionWorker(QObject):
         except Exception as e:
             logger.warning("Error during autoexpansion query for '%s': %s", self.query, e)
 
-        self.downloadFinished.emit(downloaded_count)
+        self.downloadFinished.emit(downloaded_count, next_offset)

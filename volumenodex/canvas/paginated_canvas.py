@@ -25,6 +25,35 @@ from volumenodex.core.image_utils import load_image, load_pixmap, save_image, IM
 from volumenodex.review.lens_engine import LensFinding
 
 
+class VolumenodexTextDocument(QTextDocument):
+    """QTextDocument subclass that automatically resolves and decodes images, including native .JXL format."""
+
+    def loadResource(self, resource_type: int, name: QUrl) -> Any:
+        try:
+            if resource_type in (QTextDocument.ResourceType.ImageResource.value, int(QTextDocument.ResourceType.ImageResource)):
+                url_str = name.toString()
+                local_path = name.toLocalFile()
+                candidates = []
+                if local_path:
+                    candidates.append(local_path)
+                if url_str:
+                    candidates.append(url_str)
+                    if url_str.startswith("file:///"):
+                        candidates.append(url_str[8:])
+                    elif url_str.startswith("file://"):
+                        candidates.append(url_str[7:])
+
+                for p in candidates:
+                    if p and os.path.isfile(p):
+                        img = load_image(p)
+                        if img and not img.isNull():
+                            self.addResource(QTextDocument.ResourceType.ImageResource, name, img)
+                            return img
+        except Exception:
+            pass
+        return super().loadResource(resource_type, name)
+
+
 class PaginatedCanvas(QAbstractScrollArea):
     """Luxury discrete multi-page canvas with photorealistic paper sheets, drop shadows, and typography."""
 
@@ -59,7 +88,7 @@ class PaginatedCanvas(QAbstractScrollArea):
         self.story_author = ""
 
         # Document Engine
-        self._doc = QTextDocument(self)
+        self._doc = VolumenodexTextDocument(self)
         self._doc.setUndoRedoEnabled(True)
         self._doc.setDefaultStyleSheet("body { color: #000000; }")
 
@@ -91,6 +120,35 @@ class PaginatedCanvas(QAbstractScrollArea):
         self.find_replace_bar = FindReplaceBar(self, self.viewport())
         self.find_replace_bar.hide()
 
+        # Floating Image Options HUD
+        from volumenodex.ui.image_options_bar import ImageOptionsBar
+        self.image_options_bar = ImageOptionsBar(self.viewport())
+        self.image_options_bar.hide()
+        self.image_options_bar.resizeRequested.connect(self._on_hud_resize)
+        self.image_options_bar.cropRequested.connect(self._on_hud_crop)
+        self.image_options_bar.alignmentRequested.connect(self._on_hud_alignment)
+        self.image_options_bar.copyRequested.connect(self._on_hud_copy)
+        self.image_options_bar.cutRequested.connect(self._on_hud_cut)
+        self.image_options_bar.saveRequested.connect(self._on_hud_save)
+        self.image_options_bar.deleteRequested.connect(self._on_hud_delete)
+        self._active_image_cursor: Optional[QTextCursor] = None
+        self._active_image_fmt: Optional[QTextImageFormat] = None
+
+        # Interactive Image Click-and-Drag Resizing Engine
+        self._is_resizing_image: bool = False
+        self._resize_handle: Optional[str] = None
+        self._resize_start_mouse_pt: Optional[QPointF] = None
+        self._resize_orig_width: float = 0.0
+        self._resize_orig_height: float = 0.0
+        self._resize_aspect_ratio: float = 1.0
+        self._resize_preview_width: float = 0.0
+        self._resize_preview_height: float = 0.0
+        self._resize_img_cursor: Optional[QTextCursor] = None
+        self._resize_img_fmt: Optional[QTextImageFormat] = None
+
+        self.verticalScrollBar().valueChanged.connect(self._on_scroll_update_image_bar)
+        self.horizontalScrollBar().valueChanged.connect(self._on_scroll_update_image_bar)
+
         # Blinking Cursor Timer (500ms)
         self._blink_timer = QTimer(self)
         self._blink_timer.setInterval(500)
@@ -101,11 +159,60 @@ class PaginatedCanvas(QAbstractScrollArea):
         self._doc.contentsChanged.connect(self._on_doc_contents_changed)
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.viewport().setMouseTracking(True)
         self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
+        self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
         self.sync_document_geometry()
 
     def document(self) -> QTextDocument:
         return self._doc
+
+    def register_image_resource(self, file_path_or_url: str, img: QImage) -> None:
+        """Registers an image in QTextDocument resources under all possible QUrl variants."""
+        if not file_path_or_url or img is None or img.isNull():
+            return
+        res_type = QTextDocument.ResourceType.ImageResource
+        self._doc.addResource(res_type, QUrl(file_path_or_url), img)
+        norm = os.path.normpath(file_path_or_url)
+        self._doc.addResource(res_type, QUrl(norm), img)
+        fwd = norm.replace("\\", "/")
+        self._doc.addResource(res_type, QUrl(fwd), img)
+        local_url = QUrl.fromLocalFile(norm)
+        self._doc.addResource(res_type, local_url, img)
+        self._doc.addResource(res_type, QUrl(local_url.toString()), img)
+
+    def get_image_resource(self, img_name: str) -> Optional[QImage]:
+        """Resolves an image from QTextDocument resources or disk across URL variations."""
+        if not img_name:
+            return None
+        res_type = QTextDocument.ResourceType.ImageResource
+        norm = os.path.normpath(img_name)
+        fwd = norm.replace("\\", "/")
+        local_url = QUrl.fromLocalFile(norm)
+        for u in (
+            QUrl(img_name),
+            QUrl(norm),
+            QUrl(fwd),
+            local_url,
+            QUrl(local_url.toString()),
+        ):
+            res = self._doc.resource(res_type, u)
+            if res and not (isinstance(res, QImage) and res.isNull()):
+                return res if isinstance(res, QImage) else QImage(res)
+
+        # Disk fallback
+        candidate_path = img_name
+        if candidate_path.startswith("file:///"):
+            candidate_path = QUrl(img_name).toLocalFile()
+        elif candidate_path.startswith("file://"):
+            candidate_path = candidate_path[7:]
+        if os.path.isfile(candidate_path):
+            img = load_image(candidate_path)
+            if img and not img.isNull():
+                self.register_image_resource(candidate_path, img)
+                return img
+        return None
 
     @property
     def dark_paper(self) -> bool:
@@ -451,7 +558,11 @@ class PaginatedCanvas(QAbstractScrollArea):
             ctx.selections = page_selections
 
             self._doc.documentLayout().draw(painter, ctx)
+
             painter.restore()
+
+        # 9. Selected Image Border, Drag-Resize Anchors, and Live Preview Overlay
+        self._draw_image_selection_and_handles(painter)
 
     def _get_cached_shadow(self, pw: int, ph: int) -> QPixmap:
         """Pre-renders luxury ambient occlusion and drop shadow into a cached QPixmap."""
@@ -611,11 +722,348 @@ class PaginatedCanvas(QAbstractScrollArea):
 
         p.restore()
 
+    # --- Interactive Image Geometry, Handles & Selection Engine ---
+    def _get_selected_image_info(self) -> Optional[Tuple[QTextCursor, QTextImageFormat]]:
+        """Returns (cursor, format) of the currently selected image if any."""
+        if self._cursor.hasSelection() and "\ufffc" in self._cursor.selectedText():
+            c = QTextCursor(self._doc)
+            c.setPosition(self._cursor.selectionStart())
+            c.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor)
+            fmt = c.charFormat()
+            if fmt.isImageFormat():
+                return c, fmt.toImageFormat()
+        if hasattr(self, "_active_image_cursor") and self._active_image_cursor and self._active_image_fmt:
+            if "\ufffc" in self._active_image_cursor.selectedText():
+                return self._active_image_cursor, self._active_image_fmt
+        return None
+
+    def _get_image_geometry_viewport(
+        self,
+        img_cursor: QTextCursor,
+        img_fmt: QTextImageFormat,
+        use_preview: bool = True,
+    ) -> Optional[Tuple[QRectF, int]]:
+        """Calculates the viewport bounding rectangle and page index of an image."""
+        try:
+            block = img_cursor.block()
+            if not block.isValid():
+                return None
+            b_rect = self._doc.documentLayout().blockBoundingRect(block)
+            ph_print = self.layout_model.printable_height_px
+            pw_print = self.layout_model.printable_width_px
+            page_num = max(0, int(b_rect.y() // ph_print))
+            y_in_page = b_rect.y() - page_num * ph_print
+            print_rect = self._get_printable_rect(page_num)
+            sx = self.horizontalScrollBar().value()
+            sy = self.verticalScrollBar().value()
+
+            if use_preview and self._is_resizing_image and self._resize_preview_width > 0:
+                w = float(self._resize_preview_width)
+                h = float(self._resize_preview_height)
+            else:
+                w = max(40.0, float(img_fmt.width() if img_fmt.width() > 0 else 100))
+                h = max(30.0, float(img_fmt.height() if img_fmt.height() > 0 else 80))
+
+            align = block.blockFormat().alignment()
+            if align == Qt.AlignmentFlag.AlignHCenter:
+                vx = print_rect.x() - sx + (pw_print - w) / 2
+            elif align == Qt.AlignmentFlag.AlignRight:
+                vx = print_rect.x() - sx + pw_print - w
+            else:
+                vx = print_rect.x() - sx + b_rect.x()
+
+            vy = print_rect.y() - sy + y_in_page
+            return QRectF(vx, vy, w, h), page_num
+        except Exception:
+            return None
+
+    def _get_image_handles(self, img_rect: QRectF, hit_area: bool = False) -> dict[str, QRectF]:
+        """Returns bounding rectangles for all 8 resize handles in viewport coordinates."""
+        size = 14.0 if hit_area else 8.0
+        half = size / 2.0
+        left = img_rect.left()
+        right = img_rect.right()
+        top = img_rect.top()
+        bottom = img_rect.bottom()
+        cx = (left + right) / 2.0
+        cy = (top + bottom) / 2.0
+
+        pts = {
+            "tl": (left, top),
+            "tm": (cx, top),
+            "tr": (right, top),
+            "mr": (right, cy),
+            "br": (right, bottom),
+            "bm": (cx, bottom),
+            "bl": (left, bottom),
+            "ml": (left, cy),
+        }
+        return {
+            hid: QRectF(x - half, y - half, size, size)
+            for hid, (x, y) in pts.items()
+        }
+
+    def _hit_test_image_handles(self, pt: QPointF) -> Optional[str]:
+        """Tests if a viewport point hits any resize handle of the selected image."""
+        img_info = self._get_selected_image_info()
+        if not img_info:
+            return None
+        img_cursor, img_fmt = img_info
+        geom = self._get_image_geometry_viewport(img_cursor, img_fmt, use_preview=True)
+        if not geom:
+            return None
+        img_rect, _ = geom
+        hit_handles = self._get_image_handles(img_rect, hit_area=True)
+        for hid, h_rect in hit_handles.items():
+            if h_rect.contains(pt):
+                return hid
+        return None
+
+    @staticmethod
+    def _cursor_for_handle(hid: str) -> Qt.CursorShape:
+        if hid in ("tl", "br"):
+            return Qt.CursorShape.SizeFDiagCursor
+        if hid in ("tr", "bl"):
+            return Qt.CursorShape.SizeBDiagCursor
+        if hid in ("ml", "mr"):
+            return Qt.CursorShape.SizeHorCursor
+        if hid in ("tm", "bm"):
+            return Qt.CursorShape.SizeVerCursor
+        return Qt.CursorShape.ArrowCursor
+
+    def _start_image_resize(
+        self,
+        handle_id: str,
+        pt: QPointF,
+        img_cursor: QTextCursor,
+        img_fmt: QTextImageFormat,
+    ) -> None:
+        self._is_resizing_image = True
+        self._resize_handle = handle_id
+        self._resize_start_mouse_pt = pt
+        self._resize_orig_width = float(img_fmt.width() if img_fmt.width() > 0 else 100)
+        self._resize_orig_height = float(img_fmt.height() if img_fmt.height() > 0 else 80)
+        self._resize_aspect_ratio = self._resize_orig_width / max(1.0, self._resize_orig_height)
+        self._resize_preview_width = self._resize_orig_width
+        self._resize_preview_height = self._resize_orig_height
+        self._resize_img_cursor = QTextCursor(img_cursor)
+        self._resize_img_fmt = QTextImageFormat(img_fmt)
+        self.viewport().setCursor(self._cursor_for_handle(handle_id))
+        self.viewport().update()
+
+    def _update_image_resize(self, pt: QPointF, modifiers: Qt.KeyboardModifiers) -> None:
+        if not self._is_resizing_image or not self._resize_start_mouse_pt:
+            return
+
+        dx = pt.x() - self._resize_start_mouse_pt.x()
+        dy = pt.y() - self._resize_start_mouse_pt.y()
+        orig_w = self._resize_orig_width
+        orig_h = self._resize_orig_height
+        pw_max = float(self.layout_model.printable_width_px)
+        ph_max = float(self.layout_model.printable_height_px)
+        hid = self._resize_handle
+
+        freeform = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+
+        if hid in ("br", "bl", "tr", "tl"):
+            if hid == "br":
+                sx = (orig_w + dx) / orig_w
+                sy = (orig_h + dy) / orig_h
+            elif hid == "bl":
+                sx = (orig_w - dx) / orig_w
+                sy = (orig_h + dy) / orig_h
+            elif hid == "tr":
+                sx = (orig_w + dx) / orig_w
+                sy = (orig_h - dy) / orig_h
+            else:  # tl
+                sx = (orig_w - dx) / orig_w
+                sy = (orig_h - dy) / orig_h
+
+            if freeform:
+                new_w = max(40.0, orig_w * sx)
+                new_h = max(30.0, orig_h * sy)
+            else:
+                scale = sx if abs(dx) >= abs(dy) else sy
+                scale = max(40.0 / orig_w, scale)
+                new_w = orig_w * scale
+                new_h = orig_h * scale
+        elif hid in ("mr", "ml"):
+            new_w = max(40.0, orig_w + (dx if hid == "mr" else -dx))
+            new_h = orig_h
+        elif hid in ("bm", "tm"):
+            new_w = orig_w
+            new_h = max(30.0, orig_h + (dy if hid == "bm" else -dy))
+        else:
+            new_w = orig_w
+            new_h = orig_h
+
+        if new_w > pw_max:
+            if not freeform and hid in ("br", "bl", "tr", "tl"):
+                new_h = (pw_max / orig_w) * orig_h
+            new_w = pw_max
+        if new_h > ph_max:
+            if not freeform and hid in ("br", "bl", "tr", "tl"):
+                new_w = (ph_max / orig_h) * orig_w
+            new_h = ph_max
+
+        self._resize_preview_width = round(max(40.0, new_w))
+        self._resize_preview_height = round(max(30.0, new_h))
+
+        if hasattr(self, "image_options_bar") and self.image_options_bar.isVisible():
+            self.image_options_bar.lbl_info.setText(
+                f"🖼️ Image ({int(self._resize_preview_width)} × {int(self._resize_preview_height)})"
+            )
+
+        self.viewport().update()
+
+    def _finish_image_resize(self) -> None:
+        self._is_resizing_image = False
+        final_w = self._resize_preview_width
+        final_h = self._resize_preview_height
+        img_cur = self._resize_img_cursor
+        img_fmt = self._resize_img_fmt
+
+        self._resize_handle = None
+        self._resize_start_mouse_pt = None
+        self._resize_img_cursor = None
+        self._resize_img_fmt = None
+
+        if img_cur and img_fmt:
+            if abs(final_w - self._resize_orig_width) > 1 or abs(final_h - self._resize_orig_height) > 1:
+                self._set_image_dimensions(img_cur, img_fmt, final_w, final_h)
+            else:
+                self._show_image_options_bar(img_cur, img_fmt)
+                self.viewport().update()
+        else:
+            self.viewport().update()
+
+    def _set_image_dimensions(
+        self,
+        img_cursor: QTextCursor,
+        img_fmt: QTextImageFormat,
+        new_w: float,
+        new_h: float,
+    ) -> None:
+        new_w = max(40.0, float(new_w))
+        new_h = max(30.0, float(new_h))
+        img_cursor.beginEditBlock()
+        img_cursor.removeSelectedText()
+        img_fmt.setWidth(new_w)
+        img_fmt.setHeight(new_h)
+        img_cursor.insertImage(img_fmt)
+        img_cursor.endEditBlock()
+        c_new = QTextCursor(img_cursor)
+        c_new.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor)
+        self._cursor = QTextCursor(c_new)
+        self._active_image_cursor = QTextCursor(c_new)
+        self._active_image_fmt = QTextImageFormat(img_fmt)
+        self.sync_document_geometry()
+        self.ensure_cursor_visible()
+        self._show_image_options_bar(c_new, img_fmt)
+        self.textChanged.emit()
+        self.viewport().update()
+
+    def _draw_image_selection_and_handles(self, painter: QPainter) -> None:
+        img_info = self._get_selected_image_info()
+        if not img_info:
+            return
+
+        img_cursor, img_fmt = img_info
+        geom = self._get_image_geometry_viewport(img_cursor, img_fmt, use_preview=True)
+        if not geom:
+            return
+
+        img_rect, _ = geom
+        if not img_rect.intersects(QRectF(0, 0, self.viewport().width(), self.viewport().height())):
+            return
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        if self._is_resizing_image:
+            painter.fillRect(img_rect, QColor(59, 130, 246, 25))
+
+            qimg = self.get_image_resource(img_fmt.name())
+            if qimg and not qimg.isNull():
+                painter.drawImage(img_rect, qimg)
+
+            dash_pen = QPen(QColor("#3b82f6"), 2, Qt.PenStyle.DashLine)
+            painter.setPen(dash_pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(img_rect, 2, 2)
+
+            w_disp = int(round(img_rect.width()))
+            h_disp = int(round(img_rect.height()))
+            badge_text = f"{w_disp} × {h_disp} px"
+            font = QFont("Segoe UI", 9, QFont.Weight.Bold)
+            painter.setFont(font)
+            fm = painter.fontMetrics()
+            tw = fm.horizontalAdvance(badge_text) + 16
+            th = fm.height() + 8
+            bx = img_rect.center().x() - tw / 2
+            by = img_rect.bottom() + 10
+            if by + th > self.viewport().height() - 10:
+                by = img_rect.top() - th - 10
+            badge_rect = QRectF(bx, by, tw, th)
+
+            painter.setPen(QPen(QColor("#1f2335"), 1))
+            painter.setBrush(QBrush(QColor(31, 35, 53, 235)))
+            painter.drawRoundedRect(badge_rect, 4, 4)
+
+            painter.setPen(QPen(QColor("#ffffff")))
+            painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, badge_text)
+        else:
+            border_pen = QPen(QColor("#3b82f6"), 2, Qt.PenStyle.SolidLine)
+            painter.setPen(border_pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(img_rect, 2, 2)
+
+        visual_handles = self._get_image_handles(img_rect, hit_area=False)
+        handle_pen = QPen(QColor("#2563eb"), 1.5)
+        handle_brush = QBrush(QColor("#ffffff"))
+
+        for hid, h_rect in visual_handles.items():
+            if self._is_resizing_image and hid == self._resize_handle:
+                painter.setPen(QPen(QColor("#ffffff"), 1.5))
+                painter.setBrush(QBrush(QColor("#3b82f6")))
+            else:
+                painter.setPen(handle_pen)
+                painter.setBrush(handle_brush)
+            painter.drawRect(h_rect)
+
+        painter.restore()
+
     # --- Mouse Interaction & Hit-Testing Across Discrete Sheets ---
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            pos = self._screen_point_to_doc_position(event.position())
+            pt = event.position() if hasattr(event, "position") else QPointF(event.pos())
+
+            # 1. Interactive resize handles hit-test
+            h_id = self._hit_test_image_handles(pt)
+            if h_id:
+                img_info = self._get_selected_image_info()
+                if img_info:
+                    self._start_image_resize(h_id, pt, img_info[0], img_info[1])
+                    return
+
+            # 2. Document position hit-test
+            pos = self._screen_point_to_doc_position(pt)
             if pos is not None:
+                image_info = self._find_image_at_doc_position(pos)
+                if image_info:
+                    img_cursor, img_fmt = image_info
+                    self._cursor.setPosition(img_cursor.selectionStart())
+                    self._cursor.setPosition(img_cursor.selectionEnd(), QTextCursor.MoveMode.KeepAnchor)
+                    self._active_image_cursor = QTextCursor(img_cursor)
+                    self._active_image_fmt = QTextImageFormat(img_fmt)
+                    self._is_mouse_selecting = False
+                    self._reset_cursor_blink()
+                    self.cursorPositionChanged.emit()
+                    self.viewport().update()
+                    self._show_image_options_bar(img_cursor, img_fmt)
+                    return
+
+                self._hide_image_options_bar()
                 move_mode = QTextCursor.MoveMode.KeepAnchor if (event.modifiers() & Qt.KeyboardModifier.ShiftModifier) else QTextCursor.MoveMode.MoveAnchor
                 self._cursor.setPosition(pos, move_mode)
                 self._is_mouse_selecting = True
@@ -624,31 +1072,139 @@ class PaginatedCanvas(QAbstractScrollArea):
                 self.viewport().update()
 
     def mouseMoveEvent(self, event):
+        pt = event.position() if hasattr(event, "position") else QPointF(event.pos())
+
+        # A. Drag-resizing selected image
+        if self._is_resizing_image:
+            self._update_image_resize(pt, event.modifiers())
+            return
+
+        # B. Selecting text with mouse drag
         if self._is_mouse_selecting:
-            pos = self._screen_point_to_doc_position(event.position())
+            pos = self._screen_point_to_doc_position(pt)
             if pos is not None:
                 self._cursor.setPosition(pos, QTextCursor.MoveMode.KeepAnchor)
                 self.cursorPositionChanged.emit()
                 self.viewport().update()
+            return
+
+        # C. Hover cursor feedback for resize handles & canvas elements
+        h_id = self._hit_test_image_handles(pt)
+        if h_id:
+            self.viewport().setCursor(self._cursor_for_handle(h_id))
+            return
+
+        img_info = self._get_selected_image_info()
+        if img_info:
+            geom = self._get_image_geometry_viewport(img_info[0], img_info[1], use_preview=False)
+            if geom and geom[0].contains(pt):
+                self.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+                return
+
+        pos = self._screen_point_to_doc_position(pt)
+        if pos is not None:
+            self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
+        else:
+            self.viewport().setCursor(Qt.CursorShape.ArrowCursor)
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            if self._is_resizing_image:
+                self._finish_image_resize()
+                return
+
             self._is_mouse_selecting = False
             self.ensure_cursor_visible()
+            if self._cursor.hasSelection() and "\ufffc" in self._cursor.selectedText():
+                info = self._find_image_at_doc_position(self._cursor.selectionStart())
+                if info:
+                    self._active_image_cursor = QTextCursor(info[0])
+                    self._active_image_fmt = QTextImageFormat(info[1])
+                    self._show_image_options_bar(info[0], info[1])
 
-    def contextMenuEvent(self, event):
-        pt = event.pos()
-        pos = self._screen_point_to_doc_position(pt)
-        if pos is not None:
-            image_info = self._find_image_at_doc_position(pos)
-            if image_info:
-                img_cursor, img_fmt = image_info
-                self._show_image_context_menu(event.globalPos(), img_cursor, img_fmt)
-                return
-        super().contextMenuEvent(event)
+    def leaveEvent(self, event):
+        if not self._is_resizing_image:
+            self.viewport().setCursor(Qt.CursorShape.ArrowCursor)
+        super().leaveEvent(event)
+
+    def _on_hud_resize(self) -> None:
+        if hasattr(self, "_active_image_cursor") and self._active_image_cursor and self._active_image_fmt:
+            self._apply_image_resize(self._active_image_cursor, self._active_image_fmt)
+            self._show_image_options_bar(self._active_image_cursor, self._active_image_fmt)
+
+    def _on_hud_crop(self) -> None:
+        if hasattr(self, "_active_image_cursor") and self._active_image_cursor and self._active_image_fmt:
+            self._apply_image_crop(self._active_image_cursor, self._active_image_fmt)
+            self._show_image_options_bar(self._active_image_cursor, self._active_image_fmt)
+
+    def _on_hud_alignment(self, alignment: Optional[Qt.AlignmentFlag]) -> None:
+        if hasattr(self, "_active_image_cursor") and self._active_image_cursor:
+            self._set_image_alignment(self._active_image_cursor, alignment)
+            if hasattr(self, "_active_image_fmt") and self._active_image_fmt:
+                self._show_image_options_bar(self._active_image_cursor, self._active_image_fmt)
+
+    def _on_hud_copy(self) -> None:
+        if hasattr(self, "_active_image_fmt") and self._active_image_fmt:
+            self._copy_specific_image(self._active_image_fmt)
+
+    def _on_hud_cut(self) -> None:
+        if hasattr(self, "_active_image_cursor") and self._active_image_cursor and self._active_image_fmt:
+            self._cut_specific_image(self._active_image_cursor, self._active_image_fmt)
+            self._hide_image_options_bar()
+
+    def _on_hud_save(self) -> None:
+        if hasattr(self, "_active_image_fmt") and self._active_image_fmt:
+            self._save_image_to_file(self._active_image_fmt)
+
+    def _on_hud_delete(self) -> None:
+        if hasattr(self, "_active_image_cursor") and self._active_image_cursor:
+            self._delete_specific_image(self._active_image_cursor)
+            self._hide_image_options_bar()
+
+    def _hide_image_options_bar(self) -> None:
+        if hasattr(self, "image_options_bar") and self.image_options_bar.isVisible():
+            self.image_options_bar.hide()
+        self._active_image_cursor = None
+        self._active_image_fmt = None
+
+    def _on_scroll_update_image_bar(self) -> None:
+        if hasattr(self, "image_options_bar") and self.image_options_bar.isVisible():
+            if hasattr(self, "_active_image_cursor") and self._active_image_cursor and self._active_image_fmt:
+                self._show_image_options_bar(self._active_image_cursor, self._active_image_fmt)
+
+    def _show_image_options_bar(self, img_cursor: QTextCursor, img_fmt: QTextImageFormat) -> None:
+        """Positions and displays the floating ImageOptionsBar directly above or below the image."""
+        if not hasattr(self, "image_options_bar") or not self.image_options_bar:
+            return
+
+        self._active_image_cursor = QTextCursor(img_cursor)
+        self._active_image_fmt = QTextImageFormat(img_fmt)
+
+        geom = self._get_image_geometry_viewport(img_cursor, img_fmt, use_preview=False)
+        if not geom:
+            return
+        img_rect, _ = geom
+        vx = img_rect.x()
+        vy = img_rect.y()
+        w = img_rect.width()
+        h = img_rect.height()
+
+        self.image_options_bar.update_target(img_cursor, img_fmt)
+        bar_w = self.image_options_bar.sizeHint().width()
+        bar_h = self.image_options_bar.sizeHint().height()
+
+        vw = self.viewport().width()
+        bar_x = int(max(12, min(vw - bar_w - 12, vx + (w - bar_w) / 2)))
+        bar_y = int(vy - bar_h - 10)
+        if bar_y < 10:
+            bar_y = int(vy + h + 10)
+
+        self.image_options_bar.move(bar_x, bar_y)
+        self.image_options_bar.show()
+        self.image_options_bar.raise_()
 
     def _find_image_at_doc_position(self, pos: int) -> Optional[Tuple[QTextCursor, QTextImageFormat]]:
-        """Finds if there is an image object at pos or preceding pos."""
+        """Finds if there is an image object at pos, preceding pos, or within the current block."""
         for p in [pos, max(0, pos - 1)]:
             c = QTextCursor(self._doc)
             c.setPosition(p)
@@ -656,6 +1212,19 @@ class PaginatedCanvas(QAbstractScrollArea):
             fmt = c.charFormat()
             if fmt.isImageFormat():
                 return c, fmt.toImageFormat()
+
+        block = self._doc.findBlock(pos)
+        if block.isValid():
+            b_text = block.text()
+            if "\ufffc" in b_text:
+                img_offset = b_text.find("\ufffc")
+                img_pos = block.position() + img_offset
+                c = QTextCursor(self._doc)
+                c.setPosition(img_pos)
+                c.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor)
+                fmt = c.charFormat()
+                if fmt.isImageFormat():
+                    return c, fmt.toImageFormat()
         return None
 
     def _show_image_context_menu(self, global_pos: QPoint, img_cursor: QTextCursor, img_fmt: QTextImageFormat) -> None:
@@ -713,8 +1282,8 @@ class PaginatedCanvas(QAbstractScrollArea):
         act_cut = menu.addAction("Cut Image")
         act_cut.triggered.connect(lambda: self._cut_specific_image(img_cursor, img_fmt))
 
-        act_del = menu.addAction("Delete Image")
-        act_del.triggered.connect(lambda: self._delete_specific_image(img_cursor))
+        act_delete = menu.addAction("Delete Image")
+        act_delete.triggered.connect(lambda: self._delete_specific_image(img_cursor))
 
         menu.addSeparator()
 
@@ -729,25 +1298,14 @@ class PaginatedCanvas(QAbstractScrollArea):
         dlg = ImageResizeDialog(img_fmt.width(), img_fmt.height(), page_width=pw, parent=self)
         if dlg.exec():
             new_w, new_h = dlg.get_dimensions()
-            img_cursor.beginEditBlock()
-            img_cursor.removeSelectedText()
-            img_fmt.setWidth(new_w)
-            img_fmt.setHeight(new_h)
-            img_cursor.insertImage(img_fmt)
-            img_cursor.endEditBlock()
-            self.sync_document_geometry()
-            self.ensure_cursor_visible()
-            self.viewport().update()
+            self._set_image_dimensions(img_cursor, img_fmt, new_w, new_h)
 
     def _apply_image_crop(self, img_cursor: QTextCursor, img_fmt: QTextImageFormat) -> None:
         from volumenodex.ui.image_crop_dialog import ImageCropDialog
         img_name = img_fmt.name()
-        img_var = self._doc.resource(QTextDocument.ResourceType.ImageResource, QUrl(img_name))
-        if not img_var or (isinstance(img_var, QImage) and img_var.isNull()):
-            img_var = load_image(img_name)
-        if not img_var or (isinstance(img_var, QImage) and img_var.isNull()):
+        qimg = self.get_image_resource(img_name)
+        if not qimg or qimg.isNull():
             return
-        qimg = img_var if isinstance(img_var, QImage) else QImage(img_var)
         dlg = ImageCropDialog(qimg, image_path=img_name, parent=self)
         if dlg.exec() and dlg.cropped_image and not dlg.cropped_image.isNull():
             import time
@@ -757,7 +1315,7 @@ class PaginatedCanvas(QAbstractScrollArea):
             cropped_path = os.path.join(crop_dir, f"{base_name}_cropped_{int(time.time() * 1000)}.jxl")
             save_image(dlg.cropped_image, cropped_path)
 
-            self._doc.addResource(QTextDocument.ResourceType.ImageResource, QUrl.fromLocalFile(cropped_path), dlg.cropped_image)
+            self.register_image_resource(cropped_path, dlg.cropped_image)
             img_cursor.beginEditBlock()
             img_cursor.removeSelectedText()
             new_fmt = QTextImageFormat()
@@ -766,8 +1324,14 @@ class PaginatedCanvas(QAbstractScrollArea):
             new_fmt.setHeight(dlg.cropped_image.height())
             img_cursor.insertImage(new_fmt)
             img_cursor.endEditBlock()
+            c_new = QTextCursor(img_cursor)
+            c_new.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor)
+            self._cursor = QTextCursor(c_new)
+            self._active_image_cursor = QTextCursor(c_new)
+            self._active_image_fmt = QTextImageFormat(new_fmt)
             self.sync_document_geometry()
             self.ensure_cursor_visible()
+            self._show_image_options_bar(c_new, new_fmt)
             self.viewport().update()
 
     def _set_image_alignment(self, img_cursor: QTextCursor, alignment: Optional[Qt.AlignmentFlag]) -> None:
@@ -784,11 +1348,8 @@ class PaginatedCanvas(QAbstractScrollArea):
 
     def _copy_specific_image(self, img_fmt: QTextImageFormat) -> None:
         img_name = img_fmt.name()
-        img_var = self._doc.resource(QTextDocument.ResourceType.ImageResource, QUrl(img_name))
-        if not img_var or (isinstance(img_var, QImage) and img_var.isNull()):
-            img_var = load_image(img_name)
-        if img_var and not (isinstance(img_var, QImage) and img_var.isNull()):
-            qimg = img_var if isinstance(img_var, QImage) else QImage(img_var)
+        qimg = self.get_image_resource(img_name)
+        if qimg and not qimg.isNull():
             mime = QMimeData()
             mime.setImageData(qimg)
             mime.setText(img_name)
@@ -813,11 +1374,8 @@ class PaginatedCanvas(QAbstractScrollArea):
         )
         if file_path:
             img_name = img_fmt.name()
-            img_var = self._doc.resource(QTextDocument.ResourceType.ImageResource, QUrl(img_name))
-            if not img_var or (isinstance(img_var, QImage) and img_var.isNull()):
-                img_var = load_image(img_name)
-            if img_var and not (isinstance(img_var, QImage) and img_var.isNull()):
-                qimg = img_var if isinstance(img_var, QImage) else QImage(img_var)
+            qimg = self.get_image_resource(img_name)
+            if qimg and not qimg.isNull():
                 save_image(qimg, file_path)
 
     def mouseDoubleClickEvent(self, event):
@@ -842,6 +1400,12 @@ class PaginatedCanvas(QAbstractScrollArea):
 
             pos = self._screen_point_to_doc_position(pt)
             if pos is not None:
+                image_info = self._find_image_at_doc_position(pos)
+                if image_info:
+                    img_cursor, img_fmt = image_info
+                    self._apply_image_resize(img_cursor, img_fmt)
+                    return
+
                 self._cursor.setPosition(pos)
                 self._cursor.select(QTextCursor.SelectionType.WordUnderCursor)
                 self._reset_cursor_blink()
@@ -1484,19 +2048,22 @@ class PaginatedCanvas(QAbstractScrollArea):
         os.makedirs(pasted_dir, exist_ok=True)
         img_path = os.path.join(pasted_dir, f"pasted_image_{int(time.time() * 1000)}.jxl")
         save_image(qimg, img_path)
-        return self.insert_image(img_path, width=width, alignment=alignment)
+        return self.insert_image(img_path, width=width, alignment=alignment, existing_qimage=qimg)
 
     def insert_image(
         self,
         file_path: str,
         width: Optional[int] = None,
         alignment: Optional[Qt.AlignmentFlag] = None,
-        attribution_text: Optional[str] = None
+        attribution_text: Optional[str] = None,
+        existing_qimage: Optional[QImage] = None
     ) -> bool:
         """Inserts an image into the document with auto-scaling, JXL fidelity, alignment, and optional attribution."""
-        if not os.path.exists(file_path):
-            return False
-        img = load_image(file_path)
+        img = existing_qimage
+        if img is None or img.isNull():
+            if not os.path.exists(file_path):
+                return False
+            img = load_image(file_path)
         if img is None or img.isNull():
             return False
 
@@ -1525,7 +2092,7 @@ class PaginatedCanvas(QAbstractScrollArea):
             bf.setAlignment(alignment)
             self._cursor.insertBlock(bf)
 
-        self._doc.addResource(QTextDocument.ResourceType.ImageResource, QUrl.fromLocalFile(file_path), img)
+        self.register_image_resource(file_path, img)
         self._cursor.insertImage(img_fmt)
 
         if attribution_text:
@@ -1622,11 +2189,8 @@ class PaginatedCanvas(QAbstractScrollArea):
                 if fmt.isImageFormat():
                     img_fmt = fmt.toImageFormat()
                     img_name = img_fmt.name()
-                    img_var = self._doc.resource(QTextDocument.ResourceType.ImageResource, QUrl(img_name))
-                    if not img_var or (isinstance(img_var, QImage) and img_var.isNull()):
-                        img_var = load_image(img_name)
-                    if img_var and not (isinstance(img_var, QImage) and img_var.isNull()):
-                        qimg = img_var if isinstance(img_var, QImage) else QImage(img_var)
+                    qimg = self.get_image_resource(img_name)
+                    if qimg and not qimg.isNull():
                         mime = QMimeData()
                         mime.setImageData(qimg)
                         mime.setText(img_name)
@@ -1676,6 +2240,30 @@ class PaginatedCanvas(QAbstractScrollArea):
         self.sync_document_geometry()
         self.ensure_cursor_visible()
         self.viewport().update()
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasUrls() or event.mimeData().hasImage():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dropEvent(self, event) -> None:
+        if event.mimeData().hasImage():
+            qimg = event.mimeData().imageData()
+            if qimg and not qimg.isNull():
+                self.insert_qimage(qimg)
+                event.acceptProposedAction()
+                return
+        if event.mimeData().hasUrls():
+            for u in event.mimeData().urls():
+                f = u.toLocalFile()
+                if f and os.path.exists(f):
+                    ext = os.path.splitext(f)[1].lower()
+                    if ext in (".jxl", ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"):
+                        if self.insert_image(f):
+                            event.acceptProposedAction()
+                            return
+        super().dropEvent(event)
 
     def paste_plain(self, text: Optional[str] = None) -> None:
         """Pastes plain text without any formatting, matching surrounding text format."""
@@ -1840,8 +2428,21 @@ class PaginatedCanvas(QAbstractScrollArea):
         else:
             screen_pt = event.globalPos()
 
+        global_pt = event.globalPos() if hasattr(event, "globalPos") else (event.globalPosition().toPoint() if hasattr(event, "globalPosition") else self.mapToGlobal(screen_pt))
+
         pos = self._screen_point_to_doc_position(screen_pt)
         if pos is not None:
+            image_info = self._find_image_at_doc_position(pos)
+            if image_info:
+                img_cursor, img_fmt = image_info
+                self._cursor.setPosition(img_cursor.selectionStart())
+                self._cursor.setPosition(img_cursor.selectionEnd(), QTextCursor.MoveMode.KeepAnchor)
+                self.cursorPositionChanged.emit()
+                self.viewport().update()
+                self._show_image_options_bar(img_cursor, img_fmt)
+                self._show_image_context_menu(global_pt, img_cursor, img_fmt)
+                return
+
             self._cursor.setPosition(pos)
             self.cursorPositionChanged.emit()
 

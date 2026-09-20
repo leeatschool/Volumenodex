@@ -43,16 +43,11 @@ def main():
             pass
 
     if sys.platform == "win32":
-        # Only set explicit AppUserModelID when running uncompiled in Python dev mode.
-        # When compiled as a standalone PE executable (sys.frozen), setting an unregistered
-        # AppUserModelID causes Windows Taskbar to show a generic placeholder icon for 60 seconds
-        # while attempting an Explorer shell lookup.
-        if not getattr(sys, "frozen", False):
-            try:
-                import ctypes
-                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("volumenodex.wordprocessing.studio.1.0")
-            except Exception:
-                pass
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("volumenodex.wordprocessing.studio.2.1")
+        except Exception:
+            pass
 
     try:
         qInstallMessageHandler(_qt_message_handler)
