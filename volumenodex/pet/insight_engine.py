@@ -35,12 +35,20 @@ class InsightEngine(QObject):
     ]
 
     NONFICTION_PROMPTS = [
-        "What counterargument or common misconception might a skeptical reader raise at this exact juncture?",
-        "Anchor this abstract principle with a vivid real-world example, case study, or concrete statistic.",
-        "Review your transitions: does the logical momentum carry naturally from the preceding paragraph?",
-        "Check clarity: could this key point be understood immediately by an intelligent non-specialist?",
-        "Highlight the stakes: why does this concept matter beyond purely theoretical interest?",
-        "Trim throat-clearing phrasing: cut introductory filler and start directly with the compelling insight.",
+        "Is your thesis statement explicitly defined before the conclusion of this chapter?",
+        "Consider introducing a concrete counterargument to strengthen this claim.",
+        "Ensure each major section begins with clear topical signposting for the reader.",
+        "Could a historical analogy or statistical case study make this point more persuasive?",
+        "Check transitions: does this paragraph logically flow from the preceding evidence?",
+    ]
+
+    SCREENPLAY_PROMPTS = [
+        "Scene objective check: what does your lead character desire right now in this exact slugline?",
+        "Subtext check: what is being felt or concealed beneath this dialogue exchange?",
+        "Pacing check: can this scene enter later and exit earlier to increase momentum?",
+        "Visual storytelling: is there a prop or physical action that can replace these two lines of dialogue?",
+        "Dramatic conflict: who or what is actively blocking the protagonist's immediate goal in this scene?",
+        "Soundscape cue: what ambient audio or contrast can elevate the tension before this transition?",
     ]
 
     def __init__(self, parent=None):
@@ -88,6 +96,11 @@ class InsightEngine(QObject):
         elif mode == DocumentMode.NON_FICTION:
             self.messageReady.emit(
                 "📝 <b>Non-Fiction Mode Active.</b><br>I will monitor argument structure, clarity, and expository flow.",
+                PetMood.IDLE
+            )
+        elif mode == DocumentMode.SCREENWRITING:
+            self.messageReady.emit(
+                "🎬 <b>Screenplay Studio Active.</b><br>Lights, camera, action! I will monitor scene economy, dialogue subtext, and pacing.",
                 PetMood.IDLE
             )
         else:
@@ -151,6 +164,8 @@ class InsightEngine(QObject):
                     cheer = f"Outstanding academic output. Another {m:,} words of rigorous scholarship documented!"
                 elif self.document_mode == DocumentMode.NON_FICTION:
                     cheer = f"Compelling clarity! Another {m:,} words of cogent exposition formulated."
+                elif self.document_mode == DocumentMode.SCREENWRITING:
+                    cheer = f"Action! Another {m:,} words of cinematic storytelling captured on the page."
                 else:
                     cheer = random.choice(self.active_pet.milestone_quotes) if self.active_pet.milestone_quotes else f"Congratulations on reaching {m} words!"
                 self.messageReady.emit(f"🎉 <b>{m:,} Words Reached!</b><br>{cheer}", PetMood.CELEBRATING)
@@ -213,6 +228,9 @@ class InsightEngine(QObject):
         elif self.document_mode == DocumentMode.NON_FICTION:
             prompt = random.choice(self.NONFICTION_PROMPTS)
             title = "Expository Guidance"
+        elif self.document_mode == DocumentMode.SCREENWRITING:
+            prompt = random.choice(self.SCREENPLAY_PROMPTS)
+            title = "Screenplay Spark"
         else:
             if self.active_pet.prompt_ideas:
                 prompt = random.choice(self.active_pet.prompt_ideas)

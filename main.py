@@ -45,7 +45,7 @@ def main():
     if sys.platform == "win32":
         try:
             import ctypes
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("volumenodex.wordprocessing.studio.2.1")
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("volumenodex.wordprocessing.studio.2.2")
         except Exception:
             pass
 

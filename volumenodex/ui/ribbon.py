@@ -120,6 +120,9 @@ class RibbonBar(QWidget):
     corkboardToggled = Signal()
     scratchpadToggled = Signal()
     writingPetToggled = Signal()
+    paletteToggled = Signal()
+    screenplayElementRequested = Signal(str)
+    screenplayAutoformatRequested = Signal()
 
     # Proof & Review signals
     revisionModeToggled = Signal()
@@ -1056,8 +1059,63 @@ class RibbonBar(QWidget):
         self.btn_codex.setChecked(True)
         self.btn_codex.clicked.connect(self.codexToggled.emit)
         self.drawers_group.add_widget(self.btn_codex)
+
+        self.btn_palette = self._create_tool_button("table", "Toggle Screenplay Terms & Phrases Palette", text="Terms & Phrases", checkable=True, width=135)
+        self.btn_palette.clicked.connect(self.paletteToggled.emit)
+        self.drawers_group.add_widget(self.btn_palette)
+        self.btn_palette.setVisible(False)
+
         layout.addWidget(self.drawers_group)
         layout.addWidget(create_ribbon_separator())
+
+        # Script Elements Group (Screenwriting Quick Formatting)
+        self.script_group = ModernRibbonGroup("Script Elements")
+        h_sc1 = QHBoxLayout()
+        h_sc1.setSpacing(2)
+        self.btn_sc_heading = self._create_tool_button("", "Scene Heading / Slugline (INT./EXT.)", text="Slugline", width=64)
+        self.btn_sc_heading.clicked.connect(lambda: self.screenplayElementRequested.emit("heading"))
+        h_sc1.addWidget(self.btn_sc_heading)
+
+        self.btn_sc_action = self._create_tool_button("", "Scene Description / Action", text="Action", width=55)
+        self.btn_sc_action.clicked.connect(lambda: self.screenplayElementRequested.emit("action"))
+        h_sc1.addWidget(self.btn_sc_action)
+
+        self.btn_sc_char = self._create_tool_button("", "Character Name", text="Character", width=68)
+        self.btn_sc_char.clicked.connect(lambda: self.screenplayElementRequested.emit("character"))
+        h_sc1.addWidget(self.btn_sc_char)
+
+        self.btn_sc_paren = self._create_tool_button("", "Parenthetical Direction", text="(Paren)", width=58)
+        self.btn_sc_paren.clicked.connect(lambda: self.screenplayElementRequested.emit("parenthetical"))
+        h_sc1.addWidget(self.btn_sc_paren)
+
+        self.btn_sc_dialogue = self._create_tool_button("", "Spoken Dialogue", text="Dialogue", width=65)
+        self.btn_sc_dialogue.clicked.connect(lambda: self.screenplayElementRequested.emit("dialogue"))
+        h_sc1.addWidget(self.btn_sc_dialogue)
+
+        self.btn_sc_trans = self._create_tool_button("", "Transition (CUT TO:)", text="Transition", width=70)
+        self.btn_sc_trans.clicked.connect(lambda: self.screenplayElementRequested.emit("transition"))
+        h_sc1.addWidget(self.btn_sc_trans)
+
+        h_sc2 = QHBoxLayout()
+        h_sc2.setSpacing(4)
+        self.btn_sc_lighting = self._create_tool_button("lighting", "Lighting / Technical Prompt", text="Lighting Note", width=115)
+        self.btn_sc_lighting.clicked.connect(lambda: self.screenplayElementRequested.emit("lighting"))
+        h_sc2.addWidget(self.btn_sc_lighting)
+
+        self.btn_autoformat_script = self._create_tool_button("magic", "Autoformat entire manuscript into standard screenplay geometry", text="Autoformat Script", width=130)
+        self.btn_autoformat_script.clicked.connect(self.screenplayAutoformatRequested.emit)
+        h_sc2.addWidget(self.btn_autoformat_script)
+
+        v_sc = QVBoxLayout()
+        v_sc.setSpacing(2)
+        v_sc.addLayout(h_sc1)
+        v_sc.addLayout(h_sc2)
+        self.script_group.add_layout(v_sc)
+        layout.addWidget(self.script_group)
+        self.script_group_sep = create_ribbon_separator()
+        layout.addWidget(self.script_group_sep)
+        self.script_group.setVisible(False)
+        self.script_group_sep.setVisible(False)
 
         self.cork_group = ModernRibbonGroup("Storyboarding")
         self.btn_corkboard = self._create_tool_button("corkboard", "Hybrid Corkboard & Index Cards", text="Corkboard Studio", width=140)
@@ -1096,6 +1154,9 @@ class RibbonBar(QWidget):
             self.btn_navigator.setText("Paper Outline")
             self.drawers_group.title_label.setText("Scholarly Drawers")
             self.cork_group.title_label.setText("Notes & Cards")
+            self.btn_palette.setVisible(False)
+            self.script_group.setVisible(False)
+            self.script_group_sep.setVisible(False)
         elif mode == DocumentMode.NON_FICTION:
             self.tab_widget.setTabText(self.story_tab_idx, "Structure")
             self.btn_codex.setText("Research Dossier")
@@ -1104,6 +1165,20 @@ class RibbonBar(QWidget):
             self.btn_navigator.setText("Section Outline")
             self.drawers_group.title_label.setText("Outline Drawers")
             self.cork_group.title_label.setText("Idea Board")
+            self.btn_palette.setVisible(False)
+            self.script_group.setVisible(False)
+            self.script_group_sep.setVisible(False)
+        elif mode == DocumentMode.SCREENWRITING:
+            self.tab_widget.setTabText(self.story_tab_idx, "Screenplay")
+            self.btn_codex.setText("Screenplay Codex")
+            self.btn_codex.setIcon(VectorIconFactory.create_icon("screenplay", "#7aa2f7", 18))
+            self.btn_codex.setToolTip("Toggle Screenplay Codex & Cast Dossier")
+            self.btn_palette.setVisible(True)
+            self.btn_navigator.setText("Scene Navigator")
+            self.drawers_group.title_label.setText("Script Drawers")
+            self.cork_group.title_label.setText("Scene Storyboard")
+            self.script_group.setVisible(True)
+            self.script_group_sep.setVisible(True)
         else:
             self.tab_widget.setTabText(self.story_tab_idx, "Story")
             self.btn_codex.setText("Story Codex")
@@ -1112,6 +1187,9 @@ class RibbonBar(QWidget):
             self.btn_navigator.setText("Outline Navigator")
             self.drawers_group.title_label.setText("Story Drawers")
             self.cork_group.title_label.setText("Storyboarding")
+            self.btn_palette.setVisible(False)
+            self.script_group.setVisible(False)
+            self.script_group_sep.setVisible(False)
 
     def _build_review_tab(self) -> None:
         tab = QWidget()

@@ -22,12 +22,14 @@ class DocumentMode(str, Enum):
     CREATIVE_FICTION = "creative_fiction"
     NON_FICTION = "non_fiction"
     ACADEMIC = "academic"
+    SCREENWRITING = "screenwriting"
 
 
 DOCUMENT_MODE_TITLES = {
     DocumentMode.CREATIVE_FICTION: "Creative Fiction & Narrative",
     DocumentMode.NON_FICTION: "General Non-Fiction & Essays",
     DocumentMode.ACADEMIC: "Academic & Research Paper",
+    DocumentMode.SCREENWRITING: "Screenplay & Teleplay Script",
 }
 
 
@@ -65,6 +67,11 @@ class PageMargins:
     @classmethod
     def manuscript(cls) -> "PageMargins":
         return cls(1.0, 1.0, 1.25, 1.25)
+
+    @classmethod
+    def screenplay(cls) -> "PageMargins":
+        """Industry standard script margins: 1.5in left (hole punch), 1.0in top/bottom/right."""
+        return cls(1.0, 1.0, 1.5, 1.0)
 
 
 class PageLayoutModel:

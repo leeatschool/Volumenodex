@@ -29,7 +29,7 @@ from volumenodex.core.image_utils import load_image, save_image
 logger = logging.getLogger("volumenodex.clipart.autoexpansion")
 
 DEFAULT_USER_AGENT = (
-    "Volumenodex/2.1.0 "
+    "Volumenodex/2.2.0 "
     "(https://github.com/leeatschool/Volumenodex; contact: studio@volumenodex.local) "
     "Python-urllib"
 )

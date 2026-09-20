@@ -8,7 +8,7 @@ from typing import Tuple
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit,
     QPushButton, QRadioButton, QButtonGroup, QFrame, QCheckBox
 )
 
@@ -21,7 +21,7 @@ class NewDocumentDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Create New Document — Volumenodex")
-        self.setFixedWidth(520)
+        self.setFixedWidth(660)
         self.setStyleSheet("""
             QDialog {
                 background-color: #1a1b26;
@@ -35,7 +35,7 @@ class NewDocumentDialog(QDialog):
                 color: #c0caf5;
                 border: 1px solid #292e42;
                 border-radius: 6px;
-                padding: 8px 12px;
+                padding: 7px 10px;
                 font-size: 13px;
             }
             QLineEdit:focus {
@@ -44,12 +44,12 @@ class NewDocumentDialog(QDialog):
             QRadioButton {
                 color: #c0caf5;
                 font-size: 12px;
-                spacing: 8px;
+                spacing: 6px;
             }
             QRadioButton::indicator {
-                width: 16px;
-                height: 16px;
-                border-radius: 8px;
+                width: 15px;
+                height: 15px;
+                border-radius: 7px;
                 border: 2px solid #3b4261;
                 background-color: #16161e;
             }
@@ -76,8 +76,8 @@ class NewDocumentDialog(QDialog):
         """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 22, 24, 22)
-        layout.setSpacing(14)
+        layout.setContentsMargins(22, 18, 22, 18)
+        layout.setSpacing(10)
 
         # Header Title
         lbl_header = QLabel("Start a New Document", self)
@@ -92,17 +92,22 @@ class NewDocumentDialog(QDialog):
         layout.addWidget(lbl_title_tag)
 
         self.txt_title = QLineEdit(self)
-        self.txt_title.setPlaceholderText("e.g. The Architecture of Silence or Quantum Entanglement in Neural Nets")
+        self.txt_title.setPlaceholderText("e.g. The Architecture of Silence or Noir Shadows")
         self.txt_title.setText("Untitled Document")
         self.txt_title.selectAll()
         layout.addWidget(self.txt_title)
 
         # Mode Selection Group
         lbl_mode_tag = QLabel("AUTHORING MODE & STUDIO FOCUS", self)
-        lbl_mode_tag.setStyleSheet("color: #787c99; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; margin-top: 6px;")
+        lbl_mode_tag.setStyleSheet("color: #787c99; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; margin-top: 4px;")
         layout.addWidget(lbl_mode_tag)
 
         self.btn_group = QButtonGroup(self)
+
+        # 2x2 Grid of Mode Cards (Prominently displaying all 4 modes)
+        grid = QGridLayout()
+        grid.setSpacing(8)
+        grid.setContentsMargins(0, 0, 0, 0)
 
         # Card 1: Creative Fiction
         self.card_fiction = self._create_mode_card(
@@ -111,7 +116,7 @@ class NewDocumentDialog(QDialog):
             "Story Codex with character dossiers, world lore, chapter outline navigator, and creative companion sparks.",
             checked=True
         )
-        layout.addWidget(self.card_fiction)
+        grid.addWidget(self.card_fiction, 0, 0)
 
         # Card 2: General Non-Fiction
         self.card_nonfiction = self._create_mode_card(
@@ -120,7 +125,7 @@ class NewDocumentDialog(QDialog):
             "Structured exposition, research notes, argument flow, and companion guidance for clarity and evidence.",
             checked=False
         )
-        layout.addWidget(self.card_nonfiction)
+        grid.addWidget(self.card_nonfiction, 0, 1)
 
         # Card 3: Academic & Scholarly
         self.card_academic = self._create_mode_card(
@@ -129,7 +134,18 @@ class NewDocumentDialog(QDialog):
             "Replaces Story Codex with built-in Citation & Bibliography Generator (APA, MLA, Chicago, IEEE). Scholarly tone tips.",
             checked=False
         )
-        layout.addWidget(self.card_academic)
+        grid.addWidget(self.card_academic, 1, 0)
+
+        # Card 4: Screenwriting & Script
+        self.card_screenwriting = self._create_mode_card(
+            DocumentMode.SCREENWRITING,
+            "Screenplay & Script Studio",
+            "Modernized script editor in Courier 12pt with autoformatting sluglines, dialogue, Screenplay Codex, and terms/phrases palette.",
+            checked=False
+        )
+        grid.addWidget(self.card_screenwriting, 1, 1)
+
+        layout.addLayout(grid)
 
         # Template Checkbox
         self.chk_template = QCheckBox("Generate starter manuscript outline template for this mode", self)
@@ -143,11 +159,11 @@ class NewDocumentDialog(QDialog):
                 background-color: #1f2335;
                 border: 1px solid #292e42;
                 border-radius: 6px;
-                padding: 6px 10px;
+                padding: 4px 8px;
             }
         """)
         b_layout = QVBoxLayout(self.banner)
-        b_layout.setContentsMargins(8, 6, 8, 6)
+        b_layout.setContentsMargins(8, 4, 8, 4)
         self.lbl_banner_desc = QLabel("", self.banner)
         self.lbl_banner_desc.setWordWrap(True)
         self.lbl_banner_desc.setStyleSheet("color: #7aa2f7; font-size: 11px;")
@@ -157,7 +173,7 @@ class NewDocumentDialog(QDialog):
         self._update_banner()
 
         # Dialog Buttons
-        layout.addSpacing(6)
+        layout.addSpacing(4)
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
@@ -197,41 +213,60 @@ class NewDocumentDialog(QDialog):
     def _create_mode_card(self, mode: DocumentMode, title: str, subtitle: str, checked: bool = False) -> QFrame:
         card = QFrame(self)
         card.setObjectName("modeCard")
-        card.setStyleSheet("""
-            #modeCard {
-                background-color: #16161e;
-                border: 1px solid #24283b;
-                border-radius: 7px;
-                padding: 8px 12px;
-            }
-            #modeCard:hover {
-                border-color: #3b4261;
-            }
-        """)
+        card.setCursor(Qt.CursorShape.PointingHandCursor)
 
-        h_box = QHBoxLayout(card)
-        h_box.setContentsMargins(4, 4, 4, 4)
-        h_box.setSpacing(10)
+        v_box = QVBoxLayout(card)
+        v_box.setContentsMargins(10, 8, 10, 8)
+        v_box.setSpacing(4)
+
+        h_top = QHBoxLayout()
+        h_top.setSpacing(6)
+        h_top.setContentsMargins(0, 0, 0, 0)
 
         rb = QRadioButton(card)
         rb.setChecked(checked)
         self.btn_group.addButton(rb)
         setattr(rb, "_doc_mode", mode)
         rb.toggled.connect(self._update_banner)
-        h_box.addWidget(rb)
+        h_top.addWidget(rb)
 
-        v_text = QVBoxLayout()
-        v_text.setSpacing(2)
         lbl_t = QLabel(f"<b>{title}</b>", card)
-        lbl_t.setStyleSheet("color: #c0caf5; font-size: 12px;")
-        v_text.addWidget(lbl_t)
+        lbl_t.setStyleSheet("color: #c0caf5; font-size: 11px;")
+        h_top.addWidget(lbl_t, stretch=1)
+        v_box.addLayout(h_top)
 
         lbl_s = QLabel(subtitle, card)
         lbl_s.setWordWrap(True)
-        lbl_s.setStyleSheet("color: #787c99; font-size: 10px;")
-        v_text.addWidget(lbl_s)
+        lbl_s.setStyleSheet("color: #787c99; font-size: 9.5px; line-height: 1.15;")
+        v_box.addWidget(lbl_s)
 
-        h_box.addLayout(v_text, stretch=1)
+        # Clicking anywhere on the card selects this mode
+        card.mousePressEvent = lambda e: rb.setChecked(True)
+
+        def update_card_style():
+            if rb.isChecked():
+                card.setStyleSheet("""
+                    #modeCard {
+                        background-color: #1f2335;
+                        border: 2px solid #7aa2f7;
+                        border-radius: 7px;
+                    }
+                """)
+            else:
+                card.setStyleSheet("""
+                    #modeCard {
+                        background-color: #16161e;
+                        border: 1px solid #24283b;
+                        border-radius: 7px;
+                    }
+                    #modeCard:hover {
+                        border-color: #3b4261;
+                        background-color: #1a1c28;
+                    }
+                """)
+        rb.toggled.connect(lambda _: update_card_style())
+        update_card_style()
+
         return card
 
     def _update_banner(self) -> None:
@@ -246,6 +281,12 @@ class NewDocumentDialog(QDialog):
             self.lbl_banner_desc.setText(
                 "📝 <b>Non-Fiction Mode:</b> Tailored for essays, journalism, and non-fiction books. "
                 "Writing companion focuses on argument structure, illustrative evidence, and clear topic transitions."
+            )
+            self.banner.show()
+        elif mode == DocumentMode.SCREENWRITING:
+            self.lbl_banner_desc.setText(
+                "🎬 <b>Screenwriting Mode:</b> Modernized script style formatting in Courier 12pt with autoformatting location headers, dialogue, and lighting prompts. "
+                "Includes <b>Screenplay Codex</b> and drag-and-drop <b>Terms & Phrases Palette</b>."
             )
             self.banner.show()
         else:

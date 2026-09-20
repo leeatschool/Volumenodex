@@ -211,6 +211,7 @@ class SettingsDialog(QDialog):
         self.combo_default_mode.addItem("Creative Fiction & Story Codex", DocumentMode.CREATIVE_FICTION.value)
         self.combo_default_mode.addItem("General Non-Fiction & Essays", DocumentMode.NON_FICTION.value)
         self.combo_default_mode.addItem("Academic & Scholarly Citations", DocumentMode.ACADEMIC.value)
+        self.combo_default_mode.addItem("Screenplay & Script Studio", DocumentMode.SCREENWRITING.value)
 
         idx_mode = self.combo_default_mode.findData(self.settings_manager.default_document_mode)
         if idx_mode >= 0:

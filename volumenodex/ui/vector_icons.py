@@ -413,6 +413,32 @@ class VectorIconFactory:
             painter.drawEllipse(QRectF(s * 0.46, s * 0.26, s * 0.08, s * 0.08))
             painter.drawEllipse(QRectF(s * 0.32, s * 0.52, s * 0.08, s * 0.08))
 
+        elif icon_name in ("screenplay", "clapperboard", "clapper", "movie", "script"):
+            # Sleek Hollywood clapperboard
+            painter.drawRoundedRect(QRectF(s * 0.15, s * 0.42, s * 0.70, s * 0.46), 2, 2)
+            painter.drawRoundedRect(QRectF(s * 0.15, s * 0.20, s * 0.70, s * 0.18), 2, 2)
+            # Diagonal chevron stripes
+            painter.drawLine(QPointF(s * 0.32, s * 0.20), QPointF(s * 0.24, s * 0.38))
+            painter.drawLine(QPointF(s * 0.50, s * 0.20), QPointF(s * 0.42, s * 0.38))
+            painter.drawLine(QPointF(s * 0.68, s * 0.20), QPointF(s * 0.60, s * 0.38))
+            # Slate lines & Take box
+            painter.drawLine(QPointF(s * 0.24, s * 0.56), QPointF(s * 0.50, s * 0.56))
+            painter.drawLine(QPointF(s * 0.24, s * 0.68), QPointF(s * 0.42, s * 0.68))
+            painter.drawRect(QRectF(s * 0.58, s * 0.52, s * 0.20, s * 0.24))
+
+        elif icon_name in ("lighting", "spotlight", "light_direction"):
+            # Stage spotlight with radiating beams
+            painter.drawEllipse(QRectF(s * 0.36, s * 0.16, s * 0.28, s * 0.16))
+            p_cone = QPainterPath()
+            p_cone.moveTo(s * 0.36, s * 0.24)
+            p_cone.lineTo(s * 0.22, s * 0.62)
+            p_cone.lineTo(s * 0.78, s * 0.62)
+            p_cone.lineTo(s * 0.64, s * 0.24)
+            painter.drawPath(p_cone)
+            painter.drawLine(QPointF(s * 0.32, s * 0.70), QPointF(s * 0.26, s * 0.86))
+            painter.drawLine(QPointF(s * 0.50, s * 0.70), QPointF(s * 0.50, s * 0.88))
+            painter.drawLine(QPointF(s * 0.68, s * 0.70), QPointF(s * 0.74, s * 0.86))
+
         else:
             # Generic fallback document icon
             painter.drawRoundedRect(QRectF(s * 0.2, s * 0.15, s * 0.6, s * 0.7), 2, 2)

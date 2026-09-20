@@ -16,7 +16,9 @@ from PySide6.QtWidgets import (
     QAbstractScrollArea, QScrollBar, QApplication, QMenu, QFileDialog, QMessageBox
 )
 
-from volumenodex.core.document_model import PageLayoutModel, DPI_SCREEN, PageMargins
+from volumenodex.core.document_model import (
+    PageLayoutModel, DPI_SCREEN, PageMargins, DocumentMode
+)
 from volumenodex.canvas.paper_texture import PaperTextureEngine, TextureType
 from volumenodex.core.theme_manager import ThemeManager
 from volumenodex.core.header_footer_model import HeaderFooterModel, PageHeaderFooterConfig
@@ -86,6 +88,7 @@ class PaginatedCanvas(QAbstractScrollArea):
         self.note_manager = NoteManager()
         self.story_title = ""
         self.story_author = ""
+        self.document_mode: DocumentMode = DocumentMode.CREATIVE_FICTION
 
         # Document Engine
         self._doc = VolumenodexTextDocument(self)
@@ -1515,6 +1518,14 @@ class PaginatedCanvas(QAbstractScrollArea):
                 bf = QTextBlockFormat()
                 bf.setPageBreakPolicy(QTextBlockFormat.PageBreakFlag.PageBreak_AlwaysBefore)
                 self._cursor.insertBlock(bf)
+            elif self.document_mode == DocumentMode.SCREENWRITING:
+                from volumenodex.screenplay.screenplay_formatter import ScreenplayFormatter
+                cur_block = self._cursor.block()
+                cur_text = cur_block.text()
+                cur_element = ScreenplayFormatter.get_element_type_of_block(cur_block)
+                next_element = ScreenplayFormatter.get_next_element_on_enter(cur_element, cur_text)
+                self._cursor.insertBlock()
+                ScreenplayFormatter.apply_element_format(self._cursor, next_element, dark_paper=self.dark_paper)
             else:
                 self._cursor.insertBlock()
             self.keystrokeHappened.emit(True, False)
@@ -1562,7 +1573,20 @@ class PaginatedCanvas(QAbstractScrollArea):
 
         # Tab / Backtab Indentation & Table Navigation
         elif key in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab):
-            if is_shift or key == Qt.Key.Key_Backtab:
+            if self.document_mode == DocumentMode.SCREENWRITING:
+                from volumenodex.screenplay.screenplay_formatter import ScreenplayFormatter
+                cur_block = self._cursor.block()
+                cur_element = ScreenplayFormatter.get_element_type_of_block(cur_block)
+                next_element = ScreenplayFormatter.get_next_element_on_tab(cur_element, backwards=(is_shift or key == Qt.Key.Key_Backtab))
+                ScreenplayFormatter.apply_element_format(self._cursor, next_element, dark_paper=self.dark_paper)
+                self.keystrokeHappened.emit(False, False)
+                self._update_scroll_bars()
+                self.ensure_cursor_visible()
+                self._reset_cursor_blink()
+                self.cursorPositionChanged.emit()
+                self.viewport().update()
+                return
+            elif is_shift or key == Qt.Key.Key_Backtab:
                 self.decrease_indent()
             else:
                 table = self._cursor.currentTable()
@@ -1600,6 +1624,10 @@ class PaginatedCanvas(QAbstractScrollArea):
             # Auto-numbered list check: triggered after entering a number followed by a period at start of line
             if (typed_char == "." or is_space) and self._cursor.block().textList() is None:
                 self._check_auto_numbered_list()
+
+            # Screenwriting autoformat check
+            if self.document_mode == DocumentMode.SCREENWRITING and (is_space or typed_char in (".", ":", ")")):
+                self._check_screenplay_autoformat(typed_char)
 
             self.keystrokeHappened.emit(False, is_space)
         else:
@@ -2242,10 +2270,16 @@ class PaginatedCanvas(QAbstractScrollArea):
         self.viewport().update()
 
     def dragEnterEvent(self, event) -> None:
-        if event.mimeData().hasUrls() or event.mimeData().hasImage():
+        if event.mimeData().hasUrls() or event.mimeData().hasImage() or event.mimeData().hasText():
             event.acceptProposedAction()
         else:
             super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        if event.mimeData().hasUrls() or event.mimeData().hasImage() or event.mimeData().hasText():
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
 
     def dropEvent(self, event) -> None:
         if event.mimeData().hasImage():
@@ -2263,7 +2297,120 @@ class PaginatedCanvas(QAbstractScrollArea):
                         if self.insert_image(f):
                             event.acceptProposedAction()
                             return
+        if event.mimeData().hasText():
+            text = event.mimeData().text()
+            if text:
+                pos = self._screen_point_to_doc_position(event.position())
+                if pos is not None:
+                    self._cursor.setPosition(pos)
+                self.insert_screenplay_snippet(text)
+                event.acceptProposedAction()
+                return
         super().dropEvent(event)
+
+    def _check_screenplay_autoformat(self, typed_char: str) -> None:
+        """Autoformats location headers, transitions, lighting prompts, etc. as the writer types."""
+        import re
+        from volumenodex.screenplay.screenplay_formatter import ScreenplayFormatter, ScreenplayElementType
+        cur_block = self._cursor.block()
+        text = cur_block.text()
+        stripped = text.strip()
+        s_lower = stripped.lower()
+
+        # Check sluglines: typing "int. ", "ext. ", "exterior: ", "interior: ", etc.
+        for prefix in ("int.", "ext.", "int/ext", "ext/int", "exterior:", "interior:"):
+            if s_lower.startswith(prefix) and (typed_char == " " or typed_char == "."):
+                pos_in_block = self._cursor.positionInBlock()
+                upper_prefix = prefix.upper()
+                new_text = upper_prefix + text[len(prefix):]
+                c = QTextCursor(cur_block)
+                c.select(QTextCursor.SelectionType.BlockUnderCursor)
+                c.insertText(new_text)
+                self._cursor.setPosition(cur_block.position() + min(pos_in_block, len(new_text)))
+                ScreenplayFormatter.apply_element_format(self._cursor, ScreenplayElementType.HEADING, dark_paper=self.dark_paper)
+                return
+
+        # Check transitions: "cut to:", "fade in:", "fade out.", "smash cut to:"
+        for tr in ("cut to:", "fade in:", "fade out.", "smash cut to:", "dissolve to:"):
+            if s_lower == tr or s_lower == tr.rstrip(":"):
+                c = QTextCursor(cur_block)
+                c.select(QTextCursor.SelectionType.BlockUnderCursor)
+                c.insertText(tr.upper())
+                self._cursor.setPosition(cur_block.position() + len(tr))
+                ScreenplayFormatter.apply_element_format(self._cursor, ScreenplayElementType.TRANSITION, dark_paper=self.dark_paper)
+                return
+
+        # Check act markers: "act 1", "act i", "cold open"
+        if re.match(r"^(act\s+[ivx0-9]+|cold\s+open)", s_lower):
+            pos_in_block = self._cursor.positionInBlock()
+            c = QTextCursor(cur_block)
+            c.select(QTextCursor.SelectionType.BlockUnderCursor)
+            c.insertText(stripped.upper())
+            self._cursor.setPosition(cur_block.position() + pos_in_block)
+            ScreenplayFormatter.apply_element_format(self._cursor, ScreenplayElementType.ACT_HEADER, dark_paper=self.dark_paper)
+            return
+
+        # Check parentheticals: started with '('
+        if stripped.startswith("(") and (typed_char == ")" or stripped.endswith(")")):
+            ScreenplayFormatter.apply_element_format(self._cursor, ScreenplayElementType.PARENTHETICAL, dark_paper=self.dark_paper)
+            return
+
+        # Check lighting prompt prefixes
+        for lp in ("lighting:", "light direction:", "low lighting"):
+            if s_lower.startswith(lp):
+                ScreenplayFormatter.apply_element_format(self._cursor, ScreenplayElementType.LIGHTING, dark_paper=self.dark_paper)
+                return
+
+    def insert_screenplay_snippet(self, text: str) -> None:
+        """Inserts a screenplay phrase/snippet at cursor with intelligent screenplay element formatting."""
+        from volumenodex.screenplay.screenplay_formatter import ScreenplayFormatter
+        from volumenodex.core.document_model import DocumentMode
+
+        self._cursor.beginEditBlock()
+        try:
+            lines = text.split("\n")
+            for i, line in enumerate(lines):
+                if i > 0:
+                    self._cursor.insertBlock()
+
+                if self.document_mode == DocumentMode.SCREENWRITING and line.strip():
+                    el = ScreenplayFormatter.classify_line(line)
+                    ScreenplayFormatter.apply_element_format(self._cursor, el, dark_paper=self.dark_paper)
+                    self._cursor.insertText(line)
+                else:
+                    self._cursor.insertText(line)
+        finally:
+            self._cursor.endEditBlock()
+
+        self.sync_document_geometry()
+        self.ensure_cursor_visible()
+        self.viewport().update()
+        self.textChanged.emit()
+        self.cursorPositionChanged.emit()
+
+    def set_document_mode(self, mode: DocumentMode) -> None:
+        """Sets authoring mode for canvas (e.g. Screenwriting, Academic, Creative Fiction)."""
+        self.document_mode = mode
+
+    def apply_screenplay_element(self, element_type: str, cursor: Optional[QTextCursor] = None) -> None:
+        """Applies a specific screenplay element style to the current block or specified cursor."""
+        from volumenodex.screenplay.screenplay_formatter import ScreenplayFormatter
+        target_cursor = cursor if cursor is not None else self._cursor
+        ScreenplayFormatter.apply_element_format(target_cursor, element_type, dark_paper=self.dark_paper)
+        self.sync_document_geometry()
+        self.ensure_cursor_visible()
+        self.viewport().update()
+        self.cursorPositionChanged.emit()
+
+    def autoformat_screenplay(self) -> int:
+        """Scans the manuscript and autoformats all blocks to standard script geometry."""
+        from volumenodex.screenplay.screenplay_formatter import ScreenplayFormatter
+        cnt = ScreenplayFormatter.autoformat_document(self._doc, dark_paper=self.dark_paper)
+        self.sync_document_geometry()
+        self.ensure_cursor_visible()
+        self.viewport().update()
+        self.textChanged.emit()
+        return cnt
 
     def paste_plain(self, text: Optional[str] = None) -> None:
         """Pastes plain text without any formatting, matching surrounding text format."""

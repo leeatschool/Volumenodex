@@ -45,6 +45,12 @@ from volumenodex.review import RevisionLensEngine, RevisionInspectorDrawer, Lens
 from volumenodex.review.revision_worker import ReviewWorker, ReviewAnalysisWorker
 from volumenodex.academic.citation_model import CitationManager, CitationEntry, CitationFormatter
 from volumenodex.academic.citation_drawer import CitationGeneratorDrawer
+from volumenodex.screenplay.screenplay_model import (
+    ScreenplayCodexManager, ScreenplayPhraseLibrary
+)
+from volumenodex.screenplay.screenplay_codex_drawer import ScreenplayCodexDrawer
+from volumenodex.screenplay.screenplay_palette_drawer import ScreenplayPaletteDrawer
+from volumenodex.screenplay.screenplay_formatter import ScreenplayFormatter, ScreenplayElementType
 from volumenodex.ui.new_document_dialog import NewDocumentDialog
 from volumenodex.core.image_utils import IMAGE_FILE_FILTER, load_image
 from volumenodex.core.settings_manager import SettingsManager
@@ -71,6 +77,9 @@ class MainWindow(QMainWindow):
         self.texture_engine = PaperTextureEngine()
         self.codex_manager = CodexManager()
         self.citation_manager = CitationManager()
+        self.screenplay_codex_manager = ScreenplayCodexManager()
+        self.screenplay_codex_manager.init_sample_defaults()
+        self.screenplay_phrase_library = ScreenplayPhraseLibrary()
         self.spell_engine = SpellCheckEngine()
         self.document_mode: DocumentMode = DocumentMode.CREATIVE_FICTION
         self.current_file_path: Optional[str] = None
@@ -227,6 +236,12 @@ class MainWindow(QMainWindow):
 
         self.citation_drawer = CitationGeneratorDrawer(self.citation_manager, self.right_stack)
         self.right_stack.addWidget(self.citation_drawer)
+
+        self.screenplay_codex = ScreenplayCodexDrawer(self.screenplay_codex_manager, self.right_stack)
+        self.right_stack.addWidget(self.screenplay_codex)
+
+        self.screenplay_palette = ScreenplayPaletteDrawer(self.screenplay_phrase_library, self.right_stack)
+        self.right_stack.addWidget(self.screenplay_palette)
 
         self.right_stack.setCurrentWidget(self.right_codex)
         self.right_stack.setFixedWidth(self.right_codex.width())
@@ -676,6 +691,18 @@ class MainWindow(QMainWindow):
         self.citation_drawer.collapsedChanged.connect(self._on_citation_collapsed_changed)
         self.citation_drawer.citationUpdated.connect(self._on_citations_changed)
 
+        # Screenplay Drawer connections
+        self.screenplay_codex.insertTextRequested.connect(self.canvas_area.insert_screenplay_snippet)
+        self.screenplay_palette.insertTextRequested.connect(self.canvas_area.insert_screenplay_snippet)
+        self.screenplay_codex.collapsedChanged.connect(self._on_screenplay_codex_collapsed_changed)
+        self.screenplay_palette.collapsedChanged.connect(self._on_screenplay_palette_collapsed_changed)
+        self.screenplay_codex.paletteSwitchRequested.connect(self.show_screenplay_palette)
+        self.screenplay_palette.codexSwitchRequested.connect(self.show_screenplay_codex)
+        self.screenplay_codex.entityUpdated.connect(self._on_codex_entities_changed)
+        self.ribbon.paletteToggled.connect(self._toggle_palette_panel)
+        self.ribbon.screenplayElementRequested.connect(self._on_screenplay_element_requested)
+        self.ribbon.screenplayAutoformatRequested.connect(self._on_screenplay_autoformat_requested)
+
         # Ribbon Header Actions (Print, Save & Settings)
         self.ribbon.saveRequested.connect(self.save_document)
         self.ribbon.settingsRequested.connect(self._show_settings_dialog)
@@ -698,15 +725,20 @@ class MainWindow(QMainWindow):
         tab_name = self.ribbon.tab_widget.tabText(index)
         if tab_name == "Review":
             self.show_revision_inspector()
-        elif tab_name in ("Story", "Research", "Structure"):
+        elif tab_name in ("Story", "Research", "Structure", "Screenplay", "Script"):
             if self.document_mode == DocumentMode.ACADEMIC:
                 self.show_citation_drawer()
+            elif self.document_mode == DocumentMode.SCREENWRITING:
+                self.show_screenplay_codex()
             else:
                 self.show_codex_drawer()
 
     def show_codex_drawer(self) -> None:
         if self.document_mode == DocumentMode.ACADEMIC:
             self.show_citation_drawer()
+            return
+        if self.document_mode == DocumentMode.SCREENWRITING:
+            self.show_screenplay_codex()
             return
         self.right_stack.setCurrentWidget(self.right_codex)
         self.right_codex.set_collapsed(False)
@@ -718,6 +750,45 @@ class MainWindow(QMainWindow):
         self.citation_drawer.set_collapsed(False)
         self.right_stack.setFixedWidth(self.citation_drawer.width())
         self.ribbon.btn_codex.setChecked(True)
+
+    def show_screenplay_codex(self) -> None:
+        self.right_stack.setCurrentWidget(self.screenplay_codex)
+        self.screenplay_codex.set_collapsed(False)
+        self.right_stack.setFixedWidth(self.screenplay_codex.width())
+        self.ribbon.btn_codex.setChecked(True)
+        self.ribbon.btn_palette.setChecked(False)
+
+    def show_screenplay_palette(self) -> None:
+        self.right_stack.setCurrentWidget(self.screenplay_palette)
+        self.screenplay_palette.set_collapsed(False)
+        self.right_stack.setFixedWidth(self.screenplay_palette.width())
+        self.ribbon.btn_palette.setChecked(True)
+        self.ribbon.btn_codex.setChecked(False)
+
+    def _toggle_palette_panel(self) -> None:
+        if self.right_stack.currentWidget() != self.screenplay_palette:
+            self.show_screenplay_palette()
+        else:
+            self.screenplay_palette.toggle_collapsed()
+            self.right_stack.setFixedWidth(self.screenplay_palette.width())
+            self.ribbon.btn_palette.setChecked(not self.screenplay_palette.is_collapsed)
+
+    def _on_screenplay_codex_collapsed_changed(self, is_collapsed: bool) -> None:
+        if self.document_mode == DocumentMode.SCREENWRITING and self.right_stack.currentWidget() == self.screenplay_codex:
+            self.right_stack.setFixedWidth(self.screenplay_codex.width())
+            self.ribbon.btn_codex.setChecked(not is_collapsed)
+
+    def _on_screenplay_palette_collapsed_changed(self, is_collapsed: bool) -> None:
+        if self.document_mode == DocumentMode.SCREENWRITING and self.right_stack.currentWidget() == self.screenplay_palette:
+            self.right_stack.setFixedWidth(self.screenplay_palette.width())
+            self.ribbon.btn_palette.setChecked(not is_collapsed)
+
+    def _on_screenplay_element_requested(self, element_type: str) -> None:
+        self.canvas_area.apply_screenplay_element(element_type)
+
+    def _on_screenplay_autoformat_requested(self) -> None:
+        cnt = self.canvas_area.autoformat_screenplay()
+        self.statusBar().showMessage(f"🎬 Screenplay Autoformatted: {cnt} blocks adjusted to industry script geometry.", 4000)
 
     def show_revision_inspector(self) -> None:
         self.right_stack.setCurrentWidget(self.revision_inspector)
@@ -733,6 +804,13 @@ class MainWindow(QMainWindow):
                 self.citation_drawer.toggle_collapsed()
                 self.right_stack.setFixedWidth(self.citation_drawer.width())
                 self.ribbon.btn_codex.setChecked(not self.citation_drawer.is_collapsed)
+        elif self.document_mode == DocumentMode.SCREENWRITING:
+            if self.right_stack.currentWidget() != self.screenplay_codex:
+                self.show_screenplay_codex()
+            else:
+                self.screenplay_codex.toggle_collapsed()
+                self.right_stack.setFixedWidth(self.screenplay_codex.width())
+                self.ribbon.btn_codex.setChecked(not self.screenplay_codex.is_collapsed)
         else:
             if self.right_stack.currentWidget() != self.right_codex:
                 self.show_codex_drawer()
@@ -750,7 +828,7 @@ class MainWindow(QMainWindow):
             self.ribbon.btn_inspector.setChecked(not self.revision_inspector.is_collapsed)
 
     def _on_codex_collapsed_changed(self, is_collapsed: bool) -> None:
-        if self.document_mode != DocumentMode.ACADEMIC:
+        if self.document_mode not in (DocumentMode.ACADEMIC, DocumentMode.SCREENWRITING):
             self.right_stack.setFixedWidth(self.right_codex.width())
             self.ribbon.btn_codex.setChecked(not is_collapsed)
 
@@ -777,6 +855,7 @@ class MainWindow(QMainWindow):
     def set_document_mode(self, mode: DocumentMode) -> None:
         """Adapts UI components, right-drawer widgets, and companion tone to active mode."""
         self.document_mode = mode
+        self.canvas_area.document_mode = mode
         self.ribbon.set_document_mode(mode)
         self.pet_engine.set_document_mode(mode)
 
@@ -785,6 +864,13 @@ class MainWindow(QMainWindow):
             self.right_stack.setCurrentWidget(self.citation_drawer)
             self.right_stack.setFixedWidth(self.citation_drawer.width())
             self.ribbon.btn_codex.setChecked(not self.citation_drawer.is_collapsed)
+        elif mode == DocumentMode.SCREENWRITING:
+            # Screenplay: Screenplay Codex & Palette, Courier 12pt, 1.5in margin
+            self.show_screenplay_codex()
+            self.layout_model.margins = PageMargins.screenplay()
+            self.canvas_area.set_font_family("Courier Prime")
+            self.canvas_area.set_font_size(12)
+            self.canvas_area.sync_document_geometry()
         else:
             # Fiction / Non-Fiction: Story Codex
             self.right_stack.setCurrentWidget(self.right_codex)
@@ -858,7 +944,7 @@ class MainWindow(QMainWindow):
         self._run_revision_analysis()
 
     def _on_codex_entities_changed(self) -> None:
-        self.spell_engine.sync_story_codex_whitelist(self.codex_manager)
+        self.spell_engine.sync_story_codex_whitelist(self.codex_manager, self.screenplay_codex_manager)
         if self.active_lenses.get("spelling", False):
             self._run_revision_analysis()
 
@@ -909,7 +995,7 @@ class MainWindow(QMainWindow):
         res = CodexExtractionEngine.extract_into_manager(text, self.codex_manager)
         if res.new_characters > 0 or res.new_lore > 0:
             self.right_codex.refresh()
-            self.spell_engine.sync_story_codex_whitelist(self.codex_manager)
+            self.spell_engine.sync_story_codex_whitelist(self.codex_manager, self.screenplay_codex_manager)
             parts = []
             if res.new_characters > 0:
                 parts.append(f"{res.new_characters} character{'s' if res.new_characters > 1 else ''}")
@@ -926,8 +1012,12 @@ class MainWindow(QMainWindow):
         self._run_codex_auto_extract(manual=True)
 
     def _check_live_mentions(self) -> None:
-        active_text = self.canvas_area.get_active_sentence_or_paragraph()
-        self.right_codex.highlight_mention(active_text)
+        if self.document_mode == DocumentMode.SCREENWRITING:
+            text = self.canvas_area.toPlainText()
+            self.screenplay_codex.highlight_mentions(text)
+        elif self.document_mode != DocumentMode.ACADEMIC:
+            active_text = self.canvas_area.get_active_sentence_or_paragraph()
+            self.right_codex.highlight_mention(active_text)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1397,6 +1487,12 @@ class MainWindow(QMainWindow):
         self.citation_drawer.citation_manager = self.citation_manager
         self.citation_drawer.refresh()
 
+        if mode == DocumentMode.SCREENWRITING:
+            self.screenplay_codex_manager = ScreenplayCodexManager()
+            self.screenplay_codex_manager.init_sample_defaults()
+            self.screenplay_codex.codex_manager = self.screenplay_codex_manager
+            self.screenplay_codex.refresh()
+
         self.set_document_mode(mode)
 
         if use_template:
@@ -1406,7 +1502,7 @@ class MainWindow(QMainWindow):
             self.editor.clear()
 
         self.editor.document().setModified(False)
-        self.spell_engine.sync_story_codex_whitelist(self.codex_manager)
+        self.spell_engine.sync_story_codex_whitelist(self.codex_manager, self.screenplay_codex_manager)
         self.left_navigator.scan_manuscript(self.canvas_area.document())
         self._update_window_title()
         self._update_metrics()
@@ -1456,6 +1552,31 @@ class MainWindow(QMainWindow):
                 "<p><b>IV. Synthesis and Outlook</b><br>"
                 "What remains is to translate these insights into actionable understanding for the road ahead...</p>"
             )
+        elif mode == DocumentMode.SCREENWRITING:
+            return (
+                "<p><b>FADE IN:</b></p>"
+                "<p><b>EXT. HARBOR DOCKS - NIGHT</b></p>"
+                "<p><i>LOW LIGHTING, LIT BY STREET LIGHTS ALONE.</i></p>"
+                "<p>Dense ocean fog rolls across rain-slick asphalt. Amber sodium vapor lamps cast long shimmering reflections across dark puddles.</p>"
+                "<p>At the edge of Pier 14, water slaps rhythmically against rusted steel pilings.</p>"
+                "<p>DETECTIVE MARCUS VANCE (40s), collar turned up against the cold drizzle, emerges from the shadows. His trench coat is soaked through.</p>"
+                "<p style='margin-left: 210px;'><b>MARCUS</b></p>"
+                "<p style='margin-left: 150px; margin-right: 150px;'><i>(checking watch)</i></p>"
+                "<p style='margin-left: 100px; margin-right: 120px;'>Three minutes past midnight. If Rostova is coming, she's already watching.</p>"
+                "<p>A distant foghorn groans in the bay.</p>"
+                "<p>Footsteps click sharply behind him. Steady. Unhurried.</p>"
+                "<p>Marcus turns. ELENA ROSTOVA (30s) stands ten paces back, dark navy coat pristine, holding a sealed aluminum case.</p>"
+                "<p style='margin-left: 210px;'><b>ELENA</b></p>"
+                "<p style='margin-left: 100px; margin-right: 120px;'>A good detective looks where the light falls, Marcus. A surviving one stays in the dark.</p>"
+                "<p style='margin-left: 210px;'><b>MARCUS</b></p>"
+                "<p style='margin-left: 100px; margin-right: 120px;'>Where is the cargo manifest?</p>"
+                "<p style='margin-left: 210px;'><b>ELENA</b></p>"
+                "<p style='margin-left: 150px; margin-right: 150px;'><i>(a cold, faint smile)</i></p>"
+                "<p style='margin-left: 100px; margin-right: 120px;'>Already en route to the precinct. Check your radio.</p>"
+                "<p style='margin-left: 360px;'><b>CUT TO:</b></p>"
+                "<p><b>INT. PRECINCT 4 - DISPATCH ROOM - CONTINUOUS</b></p>"
+                "<p>Bank of cathode monitors glowing fluorescent green. The emergency teletype printer starts chattering frantically.</p>"
+            )
         else:
             return (
                 "<p><b>Chapter One: The Salt and the Stars</b></p>"
@@ -1481,6 +1602,9 @@ class MainWindow(QMainWindow):
             try:
                 self.codex_manager.from_dict(meta)
                 self.right_codex.refresh()
+                if "screenplay_codex" in meta and isinstance(meta["screenplay_codex"], dict):
+                    self.screenplay_codex_manager.from_dict(meta["screenplay_codex"])
+                    self.screenplay_codex.refresh()
                 if "citations" in meta and isinstance(meta["citations"], list):
                     self.citation_manager.from_dict(meta["citations"])
                     if "citation_style" in meta:
@@ -1496,7 +1620,7 @@ class MainWindow(QMainWindow):
                     self.set_document_mode(DocumentMode.CREATIVE_FICTION)
             except Exception as e:
                 print(f"Warning: Companion metadata corrupted or partially invalid: {e}")
-        self.spell_engine.sync_story_codex_whitelist(self.codex_manager)
+        self.spell_engine.sync_story_codex_whitelist(self.codex_manager, self.screenplay_codex_manager)
         self.left_navigator.scan_manuscript(self.canvas_area.document())
         self._check_live_mentions()
         self.editor.document().setModified(False)
@@ -1559,11 +1683,13 @@ class MainWindow(QMainWindow):
             meta["document_mode"] = self.document_mode.value
             meta["citations"] = self.citation_manager.to_dict()
             meta["citation_style"] = self.citation_manager.active_style
+            meta["screenplay_codex"] = self.screenplay_codex_manager.to_dict()
             if self.story_metadata:
                 meta.update(self.story_metadata)
                 meta["document_mode"] = self.document_mode.value
                 meta["citations"] = self.citation_manager.to_dict()
                 meta["citation_style"] = self.citation_manager.active_style
+                meta["screenplay_codex"] = self.screenplay_codex_manager.to_dict()
             success = IOManager.save_docx(
                 self.current_file_path,
                 self.editor.document(),
@@ -1575,7 +1701,13 @@ class MainWindow(QMainWindow):
                 self._rebuild_recent_menu()
                 self.editor.document().setModified(False)
                 self._update_window_title()
-                self.statusBar().showMessage("Document, Story Codex, and Citations saved successfully.", 3000)
+                if self.document_mode == DocumentMode.SCREENWRITING:
+                    msg = "Screenplay, Script Codex, and Palette metadata saved successfully."
+                elif self.document_mode == DocumentMode.ACADEMIC:
+                    msg = "Document and Citations saved successfully."
+                else:
+                    msg = "Document, Story Codex, and Citations saved successfully."
+                self.statusBar().showMessage(msg, 3000)
                 self._cleanup_draft_recovery()
             return bool(success)
 
@@ -1844,8 +1976,8 @@ class MainWindow(QMainWindow):
             "About Volumenodex",
             "<h3>Volumenodex Studio</h3>"
             "<p>A standalone, high-fidelity Windows word processing program crafted for creative storytellers and document authors.</p>"
-            "<p><b>Version:</b> 0.1.0 (Phase 1: Core Engine & Paginated Canvas)<br>"
-            "<b>Features:</b> Procedural Paper Grain Textures, Print Fidelity, Classic Ribbon, Interactive Top Ruler, Native .docx IO & PDF Vector Export.</p>"
+            "<p><b>Version:</b> 2.2.0 (Screenwriting Studio & Creative Suite)<br>"
+            "<b>Features:</b> Screenplay Studio, Screenplay Codex, Drag & Drop Phrases Palette, Procedural Paper Grain, Print Fidelity, Native .docx IO & Vector PDF Export.</p>"
         )
 
     def _populate_initial_manuscript(self) -> None:
@@ -1853,7 +1985,7 @@ class MainWindow(QMainWindow):
         self.editor.document().setModified(False)
         self.left_navigator.scan_manuscript(self.canvas_area.document())
         self.right_codex.refresh()
-        self.spell_engine.sync_story_codex_whitelist(self.codex_manager)
+        self.spell_engine.sync_story_codex_whitelist(self.codex_manager, self.screenplay_codex_manager)
         self._update_window_title()
 
     # --- Save on Close & Document State Tracking ---

@@ -71,6 +71,18 @@
 
 ---
 
+### 🌟 What's New in Version 2.2.0
+
+* **Screenwriting Authoring Mode**: A specialized script authoring mode providing a modernized RawScripts-style workflow with standard Courier Prime 12pt typography and 1.5" left-margin binding geometry.
+* **Smart Enter & Tab Script Routing**: Context-aware cursor navigation that automatically routes between script elements on `Enter` (`Slugline → Action`, `Character → Dialogue`, `Parenthetical → Dialogue`, `Dialogue → Action`, `Transition → Slugline`) and cycles forward/backward on `Tab`/`Shift+Tab` (`Action ⇄ Character ⇄ Parenthetical ⇄ Dialogue ⇄ Transition ⇄ Slugline`).
+* **Live Script Autoformatting**: Intelligent real-time classification and indent formatting for scene headings (`INT.`, `EXT.`, `INTERIOR:`, `EXTERIOR:`), character names, parentheticals, transitions (`CUT TO:`, `FADE IN:`), and lighting direction.
+* **Screenplay Codex Drawer**: A script-optimized evolution of the Story Codex featuring Cast member dossiers (actor archetypes, dialogue cadences, character arcs across acts), Scene & Location profiles with lighting setups, sensory notes, and props, plus an Act & Narrative Beat breakdown. Mentions in the manuscript are tracked and highlighted in real time.
+* **Drag-and-Drop Terms & Phrases Palette**: A categorized drawer preloaded with industry script conventions across Headings (Exteriors/Interiors), Light Direction & Atmosphere, Setting Notes, Stage Directions, Prop Directions, and Act/Scene Markers. Drag snippets directly onto any position on the canvas or click `+` to insert at cursor. Includes a custom notes modal dialog with persistent storage.
+* **Responsive 2x2 New Document Wizard**: Redesigned creation dialog with a balanced 2x2 grid layout and full-card clickability, comfortably fitting high-DPI laptop displays without vertical overflow.
+* **Screenplay Spelling Whitelist**: Integrated Screenplay Codex cast names and scene locations directly into the spell checker whitelist to eliminate false positives during drafting.
+
+---
+
 ### 🌟 What's New in Version 2.1.0
 
 * **Direct Magnifying Glass & Enter-Triggered Search**: Replaced real-time per-character parsing with an instant-response search bar triggered solely upon pressing `Enter` or clicking the interactive magnifying glass button, ensuring fluid, zero-lag query execution across tens of thousands of catalog items.
@@ -89,9 +101,9 @@ Pre-compiled standalone binary packages for each operating system are available 
 
 | Platform | Package | Description |
 | :--- | :--- | :--- |
-| **Windows x64** | `Volumenodex-v2.1.0-Windows-x64.zip` | Standalone portable zip containing `Volumenodex.exe` and full clipart library |
-| **macOS** | `Volumenodex-v2.1.0-macOS.dmg` / `.zip` | Drag-and-drop macOS universal application bundle (`Volumenodex.app`) |
-| **Linux x86_64** | `Volumenodex-v2.1.0-Linux-x86_64.tar.gz` | Portable distribution with `run.sh` script and desktop entry integration |
+| **Windows x64** | `Volumenodex-v2.2.0-Windows-x64.zip` | Standalone portable zip containing `Volumenodex.exe` and full clipart library |
+| **macOS** | `Volumenodex-v2.2.0-macOS.dmg` / `.zip` | Drag-and-drop macOS universal application bundle (`Volumenodex.app`) |
+| **Linux x86_64** | `Volumenodex-v2.2.0-Linux-x86_64.tar.gz` | Portable distribution with `run.sh` script and desktop entry integration |
 
 ---
 
@@ -142,6 +154,6 @@ Volumenodex utilizes a GitHub Actions automated workflow (`.github/workflows/bui
 
 ## 📄 License & Status
 
-**Version**: `2.1.0`  
+**Version**: `2.2.0`  
 **Status**: Production Release  
 Copyright © 2026. All rights reserved.

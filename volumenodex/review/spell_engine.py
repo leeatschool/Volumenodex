@@ -112,27 +112,36 @@ class SpellCheckEngine:
                 self.session_ignored.add(w_clean)
                 self._suggestion_cache.pop(w_clean, None)
 
-    def sync_story_codex_whitelist(self, codex_manager) -> None:
-        """Whitelists all character names, aliases, and worldbuilding lore terms."""
-        if not codex_manager:
-            return
-
+    def sync_story_codex_whitelist(self, codex_manager=None, screenplay_codex_manager=None) -> None:
+        """Whitelists all character names, aliases, and worldbuilding lore terms (plus screenplay cast and locations)."""
         new_whitelist: Set[str] = set()
 
-        # Add characters and aliases
-        for char in codex_manager.characters:
-            for token in re.findall(r"\b[a-zA-Z]+\b", char.name):
-                new_whitelist.add(token.lower())
-            for alias in char.aliases:
-                for token in re.findall(r"\b[a-zA-Z]+\b", alias):
+        if codex_manager:
+            # Add characters and aliases
+            for char in getattr(codex_manager, "characters", []):
+                for token in re.findall(r"\b[a-zA-Z]+\b", char.name):
                     new_whitelist.add(token.lower())
+                for alias in getattr(char, "aliases", []):
+                    for token in re.findall(r"\b[a-zA-Z]+\b", alias):
+                        new_whitelist.add(token.lower())
 
-        # Add lore titles and aliases
-        for lore in codex_manager.lore_entries:
-            for token in re.findall(r"\b[a-zA-Z]+\b", lore.title):
-                new_whitelist.add(token.lower())
-            for alias in lore.aliases:
-                for token in re.findall(r"\b[a-zA-Z]+\b", alias):
+            # Add lore titles and aliases
+            for lore in getattr(codex_manager, "lore_entries", []):
+                for token in re.findall(r"\b[a-zA-Z]+\b", lore.title):
+                    new_whitelist.add(token.lower())
+                for alias in getattr(lore, "aliases", []):
+                    for token in re.findall(r"\b[a-zA-Z]+\b", alias):
+                        new_whitelist.add(token.lower())
+
+        if screenplay_codex_manager:
+            for char in getattr(screenplay_codex_manager, "characters", []):
+                for token in re.findall(r"\b[a-zA-Z]+\b", char.name):
+                    new_whitelist.add(token.lower())
+                for alias in getattr(char, "aliases", []):
+                    for token in re.findall(r"\b[a-zA-Z]+\b", alias):
+                        new_whitelist.add(token.lower())
+            for scene in getattr(screenplay_codex_manager, "scenes", []):
+                for token in re.findall(r"\b[a-zA-Z]+\b", scene.location_name):
                     new_whitelist.add(token.lower())
 
         with self._lock:
