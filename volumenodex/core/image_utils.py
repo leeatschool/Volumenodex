@@ -70,10 +70,9 @@ def load_image(file_path: str) -> Optional[QImage]:
                 pil_img = PIL.Image.open(file_path)
                 if pil_img.mode not in ("RGB", "RGBA"):
                     pil_img = pil_img.convert("RGBA")
-                # Convert via ImageQt
+                # Convert via ImageQt and deep-copy buffer for PySide6 C++ memory safety
                 qimg = ImageQt.ImageQt(pil_img)
-                # Clone to own QImage buffer
-                return QImage(qimg)
+                return QImage(qimg).copy()
             except Exception as e:
                 pass
 

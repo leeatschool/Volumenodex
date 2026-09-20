@@ -314,20 +314,23 @@ def test_clipart_dialog_search_and_robustness(app):
         assert dlg.list_widget.count() == 0
         assert not dlg.initial_card.isHidden()
 
-        # Search for dragon
+        # Search for dragon via btn_search
         dlg.search_input.setText("dragon")
+        dlg.btn_search.click()
         visible = [dlg.list_widget.item(i) for i in range(dlg.list_widget.count()) if not dlg.list_widget.item(i).isHidden()]
         assert len(visible) == 1
         assert "Dragon" in visible[0].text()
 
-        # Search for nested subfolder item
+        # Search for nested subfolder item via Enter
         dlg.search_input.setText("shield")
+        dlg.search_input.returnPressed.emit()
         visible_shield = [dlg.list_widget.item(i) for i in range(dlg.list_widget.count()) if not dlg.list_widget.item(i).isHidden()]
         assert len(visible_shield) == 1
         assert "Knight Shield" in visible_shield[0].text()
 
         # Search with no matches
         dlg.search_input.setText("spaceship")
+        dlg.btn_search.click()
         visible_none = [dlg.list_widget.item(i) for i in range(dlg.list_widget.count()) if not dlg.list_widget.item(i).isHidden()]
         assert len(visible_none) == 0
         assert not dlg.no_results_card.isHidden()
@@ -343,9 +346,12 @@ def test_clipart_dialog_search_and_robustness(app):
         visible_all = [dlg.list_widget.item(i) for i in range(dlg.list_widget.count()) if not dlg.list_widget.item(i).isHidden()]
         assert len(visible_all) == 4
 
-        # Enter key triggers auto-selection
+        # Search dragon and insert item
         dlg.search_input.setText("dragon")
-        dlg.search_input.returnPressed.emit()
+        dlg.btn_search.click()
+        assert dlg.list_widget.count() == 1
+        dlg.list_widget.item(0).setSelected(True)
+        dlg._on_insert_clicked()
         assert dlg.selected_file is not None
         assert "dragon_crest.png" in dlg.selected_file
         dlg.close()
