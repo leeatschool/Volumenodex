@@ -31,7 +31,7 @@
 * **Lossless Image Copy & Paste**: Full clipboard integration—copy or cut images directly from the manuscript and paste images from the system clipboard or local file paths without placeholder characters.
 
 ### 4. Baked-In Clipart Library & Wikimedia Autoexpansion
-* **20,000+ Baked-in Illustrations**: Packaged with over 20,500 curated, compressed `.jxl` illustrations directly in the program library (`assets/clipart/`).
+* **20,000+ Baked-in Illustrations**: Packaged with over 20,500 curated, compressed, public domain `.jxl` illustrations directly in the program library (`assets/clipart/`).
 * **Deep Metadata Search**: High-performance local search scanning image titles, EXIF descriptions, artist data, comments, and Windows Explorer `XPKeywords` (tag 40094).
 * **Wikimedia Commons Autoexpansion**: Automatically triggers when local search matches are sparse (< 3) or on demand via *"Not what you're looking for? Load more!"*, progressively expanding your local library.
 * **License & Attribution Safeguards**: Filter illustrations by Public Domain/CC0, CC-BY, and CC-BY-SA, with automatic italicized attribution insertion for CC licenses.
