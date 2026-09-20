@@ -36,13 +36,30 @@ class SpellCheckEngine:
         self.story_whitelist: Set[str] = set()
         self._suggestion_cache: Dict[str, List[str]] = {}
 
-        # Initialize spellchecker backend
-        if PYSPELLCHECKER_AVAILABLE:
-            self.spell = SpellChecker(language="en")
-        else:
-            self.spell = None
-
+        # Lazy spellchecker backend to guarantee sub-second startup
+        self._spell: Optional[SpellChecker] = None
         self._load_user_dictionary()
+
+    @property
+    def spell(self) -> Optional[SpellChecker]:
+        """Lazily instantiates the underlying SpellChecker dictionary on demand."""
+        if self._spell is None and PYSPELLCHECKER_AVAILABLE:
+            with self._lock:
+                if self._spell is None:
+                    try:
+                        loaded = SpellChecker(language="en")
+                        if self.user_words:
+                            loaded.word_frequency.load_words(list(self.user_words))
+                        self._spell = loaded
+                    except Exception as e:
+                        print(f"Notice: Could not load spellchecker dictionary: {e}")
+                        self._spell = None
+        return self._spell
+
+    @spell.setter
+    def spell(self, val: Optional[SpellChecker]) -> None:
+        with self._lock:
+            self._spell = val
 
     def _load_user_dictionary(self) -> None:
         """Loads custom author words from persistence."""
@@ -52,8 +69,8 @@ class SpellCheckEngine:
                     data = json.load(f)
                     if isinstance(data, list):
                         self.user_words = {w.lower().strip() for w in data if w.strip()}
-                        if self.spell:
-                            self.spell.word_frequency.load_words(list(self.user_words))
+                        if self._spell is not None:
+                            self._spell.word_frequency.load_words(list(self.user_words))
         except Exception as e:
             print(f"Notice: Could not load user dictionary: {e}")
 

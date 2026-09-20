@@ -148,7 +148,7 @@ class MainWindow(QMainWindow):
             self.settings_manager.daily_word_goal
         )
         self._reposition_pet_dock()
-        self._schedule_revision_analysis()
+        QTimer.singleShot(800, self._schedule_revision_analysis)
 
         # Check auto-open recent document setting
         if self.settings_manager.auto_open_recent:
@@ -260,18 +260,40 @@ class MainWindow(QMainWindow):
         self.ribbon.btn_filler.setChecked(True)
 
     def _setup_window_icon(self) -> None:
-        """Sets application window and taskbar icon from bundled assets or system downloads."""
-        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        """Sets application window and taskbar icon from bundled assets."""
+        import sys
+        base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
         icon_candidates = [
-            os.path.join(repo_root, "assets", "icon.png"),
-            os.path.join(repo_root, "volumenodex", "resources", "app_icon.png"),
-            r"C:\Users\thele\Downloads\WHCP.png",
+            os.path.join(base_dir, "assets", "app_icon.ico"),
+            os.path.join(base_dir, "volumenodex", "resources", "app_icon.ico"),
+            os.path.join(os.path.dirname(sys.executable), "assets", "app_icon.ico"),
+            os.path.join(os.path.dirname(sys.executable), "_internal", "assets", "app_icon.ico"),
+            os.path.join(os.path.dirname(sys.executable), "app_icon.ico"),
+            os.path.join(base_dir, "assets", "icon.png"),
+            os.path.join(base_dir, "volumenodex", "resources", "app_icon.png"),
         ]
         for p in icon_candidates:
             if os.path.exists(p):
                 ico = QIcon(p)
                 if not ico.isNull():
                     self.setWindowIcon(ico)
+                    if sys.platform == "win32" and p.lower().endswith(".ico"):
+                        try:
+                            import ctypes
+                            hwnd = int(self.winId())
+                            if hwnd:
+                                h_icon_big = ctypes.windll.user32.LoadImageW(
+                                    0, p, 1, 0, 0, 0x0010 | 0x00000040
+                                )
+                                h_icon_sm = ctypes.windll.user32.LoadImageW(
+                                    0, p, 1, 16, 16, 0x0010
+                                )
+                                if h_icon_big:
+                                    ctypes.windll.user32.SendMessageW(hwnd, 0x0080, 1, h_icon_big)
+                                if h_icon_sm:
+                                    ctypes.windll.user32.SendMessageW(hwnd, 0x0080, 0, h_icon_sm)
+                        except Exception:
+                            pass
                     break
 
     def _init_menu_bar(self) -> None:
@@ -1168,28 +1190,55 @@ class MainWindow(QMainWindow):
 
     def _on_insert_clip_art(self) -> None:
         """Opens the Clip Art Library dialog to select, search, or autoexpand clip art."""
-        clipart_dir = getattr(self.settings_manager, "clipart_library_dir", "") if self.settings_manager else ""
-        if not clipart_dir or not os.path.exists(clipart_dir):
-            base_dir = getattr(sys, '_MEIPASS', os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-            bundled_dir = os.path.join(base_dir, "assets", "clipart")
-            if os.path.exists(bundled_dir) and len(os.listdir(bundled_dir)) > 1:
-                clipart_dir = bundled_dir
-            elif os.path.exists(r"C:\Users\Aaron\Pictures\Compressed Clip Art"):
-                clipart_dir = r"C:\Users\Aaron\Pictures\Compressed Clip Art"
-            else:
-                clipart_dir = bundled_dir
+        try:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            clipart_dir = getattr(self.settings_manager, "clipart_library_dir", "") if self.settings_manager else ""
+            if not clipart_dir or not os.path.exists(clipart_dir):
+                candidates = []
+                if hasattr(sys, '_MEIPASS'):
+                    candidates.append(os.path.join(sys._MEIPASS, "assets", "clipart"))
+                if getattr(sys, 'frozen', False):
+                    exe_dir = os.path.dirname(sys.executable)
+                    candidates.append(os.path.join(exe_dir, "_internal", "assets", "clipart"))
+                    candidates.append(os.path.join(exe_dir, "assets", "clipart"))
+                repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+                candidates.append(os.path.join(repo_root, "assets", "clipart"))
+                candidates.append(r"C:\Users\Aaron\Pictures\Compressed Clip Art")
 
-        dlg = ClipArtDialog(clipart_dir, settings_manager=self.settings_manager, parent=self)
-        if dlg.exec():
-            if dlg.selected_file:
-                success = self.canvas_area.insert_image(
-                    dlg.selected_file,
-                    attribution_text=dlg.selected_attribution
-                )
-                if success:
-                    self.status_bar.set_message(f"Inserted clip art: {os.path.basename(dlg.selected_file)}")
-                else:
-                    QMessageBox.warning(self, "Clip Art Error", "Unable to load the selected clip art.")
+                for cand in candidates:
+                    if os.path.isdir(cand):
+                        try:
+                            if any(True for _ in os.scandir(cand)):
+                                clipart_dir = cand
+                                break
+                        except Exception:
+                            pass
+                if not clipart_dir:
+                    clipart_dir = candidates[0] if candidates else ""
+
+            dlg = ClipArtDialog(clipart_dir, settings_manager=self.settings_manager, parent=self)
+            dlg.setWindowModality(Qt.WindowModality.ApplicationModal)
+        except Exception as e:
+            QMessageBox.critical(self, "Clip Art Library", f"Could not initialize clip art dialog:\n{e}")
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        try:
+            dlg.raise_()
+            dlg.activateWindow()
+            if dlg.exec():
+                if dlg.selected_file:
+                    success = self.canvas_area.insert_image(
+                        dlg.selected_file,
+                        attribution_text=dlg.selected_attribution
+                    )
+                    if success:
+                        self.status_bar.set_message(f"Inserted clip art: {os.path.basename(dlg.selected_file)}")
+                    else:
+                        QMessageBox.warning(self, "Clip Art Error", "Unable to load the selected clip art.")
+        except Exception as e:
+            QMessageBox.critical(self, "Clip Art Error", f"An error occurred in clip art library:\n{e}")
 
     def _insert_page_break(self) -> None:
         self.canvas_area.insert_page_break()

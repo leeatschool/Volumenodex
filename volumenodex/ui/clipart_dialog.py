@@ -34,7 +34,8 @@ class ClipArtDialog(QDialog):
         self._indexed_items: List[Dict[str, Any]] = []
         self._current_matches: List[Dict[str, Any]] = []
         self._displayed_count: int = 0
-        self._batch_size: int = 120
+        self._batch_size: int = 36
+        self._thumb_cache: Dict[str, Tuple[QIcon, str]] = {}
 
         self._metadata_cache = ClipartMetadataCache()
         self._load_more_clicks: int = 0
@@ -201,6 +202,7 @@ class ClipArtDialog(QDialog):
         self.list_widget.setSpacing(6)
         self.list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
         self.list_widget.itemSelectionChanged.connect(self._on_selection_changed)
+        self.list_widget.verticalScrollBar().valueChanged.connect(self._on_scroll)
         layout.addWidget(self.list_widget, stretch=1)
 
         # Empty library card banner
@@ -430,8 +432,15 @@ class ClipArtDialog(QDialog):
         if query and total_matches < 3:
             self._trigger_autoexpansion(query, offset=0, max_images=5)
 
+    def _on_scroll(self, val: int) -> None:
+        """Dynamically renders subsequent batches when user scrolls near the bottom."""
+        bar = self.list_widget.verticalScrollBar()
+        if bar.maximum() > 0 and val >= bar.maximum() - 25:
+            if self._displayed_count < len(self._current_matches):
+                self._render_match_batch(self._batch_size)
+
     def _render_match_batch(self, count: int) -> None:
-        """Renders up to count items into the list widget with thumbnails."""
+        """Renders up to count items into the list widget with high-performance cached thumbnails."""
         start_idx = self._displayed_count
         end_idx = min(len(self._current_matches), start_idx + count)
 
@@ -442,12 +451,19 @@ class ClipArtDialog(QDialog):
             category = rec["category"]
             ext = rec.get("ext", os.path.splitext(full_path)[1])
 
-            pix = load_pixmap(full_path)
-            if pix and not pix.isNull():
-                scaled = pix.scaled(96, 96, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-                icon = QIcon(scaled)
+            cached = self._thumb_cache.get(full_path)
+            if cached is not None:
+                icon, dims = cached
             else:
-                icon = QIcon()
+                pix = load_pixmap(full_path)
+                if pix and not pix.isNull():
+                    scaled = pix.scaled(96, 96, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                    icon = QIcon(scaled)
+                    dims = f"{pix.width()}×{pix.height()} px"
+                else:
+                    icon = QIcon()
+                    dims = "Unknown"
+                self._thumb_cache[full_path] = (icon, dims)
 
             display_label = clean_title if len(clean_title) <= 22 else clean_title[:20] + "…"
             item = QListWidgetItem(icon, display_label)
@@ -462,7 +478,6 @@ class ClipArtDialog(QDialog):
                 size_kb = 0.0
 
             cat_str = f"Category: {category}\n" if category else ""
-            dims = f"{pix.width()}×{pix.height()} px" if (pix and not pix.isNull()) else "Unknown"
             item.setToolTip(f"{clean_title}\n{cat_str}Resolution: {dims}\nFormat: {ext[1:].upper()}\nSize: {size_kb:.1f} KB")
 
             self.list_widget.addItem(item)

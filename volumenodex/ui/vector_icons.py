@@ -8,11 +8,18 @@ from PySide6.QtGui import (
 )
 
 
+_ICON_CACHE: Dict[Tuple[str, str, int], QIcon] = {}
+
+
 class VectorIconFactory:
     """Renders crisp, resolution-independent vector icons using QPainterPath."""
 
     @staticmethod
     def create_icon(icon_name: str, color: str = "#c0caf5", size: int = 20) -> QIcon:
+        cache_key = (icon_name, color, size)
+        if cache_key in _ICON_CACHE:
+            return _ICON_CACHE[cache_key]
+
         pixmap = QPixmap(size, size)
         pixmap.fill(Qt.GlobalColor.transparent)
 
@@ -413,4 +420,6 @@ class VectorIconFactory:
             painter.drawLine(QPointF(s * 0.35, s * 0.5), QPointF(s * 0.65, s * 0.5))
 
         painter.end()
-        return QIcon(pixmap)
+        res_icon = QIcon(pixmap)
+        _ICON_CACHE[cache_key] = res_icon
+        return res_icon

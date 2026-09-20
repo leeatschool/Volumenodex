@@ -103,6 +103,6 @@ pyinstaller Volumenodex.spec
 
 ## 📄 License & Status
 
-**Version**: `1.3.0`  
+**Version**: `2.0.0`  
 **Status**: Production Release  
 Copyright © 2026. All rights reserved.

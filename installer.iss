@@ -1,20 +1,24 @@
 ; Script generated for Inno Setup 6
 #define MyAppName "Volumenodex"
-#define MyAppVersion "1.3.0"
+#define MyAppVersion "2.0.0"
 #define MyAppPublisher "Volumenodex"
+#define MyAppURL "https://github.com/leeatschool/Volumenodex"
 #define MyAppExeName "Volumenodex.exe"
 
 [Setup]
-AppId={{D37E8C94-2A4B-4E7B-9C0F-6A48D6C31B8A}
+AppId={{D1A3F5B8-9A74-4C3D-8B4E-1C8F3A2E7B9D}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-DefaultDirName={autopf}\{#MyAppName}
+AppPublisherURL={#MyAppURL}
+AppSupportURL={#MyAppURL}
+AppUpdatesURL={#MyAppURL}
+DefaultDirName={localappdata}\Programs\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
-OutputDir=C:\Users\Aaron\Downloads\Volumenodex-v1.0.0-Windows-x64
-OutputBaseFilename=Volumenodex-v1.3.0-Setup
-SetupIconFile=C:\Users\Aaron\Downloads\Volumenodex-v1.0.0-Windows-x64\app_icon.ico
+OutputDir=.
+OutputBaseFilename=Volumenodex-v2.0.0-Setup
+SetupIconFile=assets\app_icon.ico
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -28,7 +32,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
-Source: "C:\Users\Aaron\Downloads\Volumenodex-v1.0.0-Windows-x64\Volumenodex\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\Volumenodex\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\app_icon.ico"

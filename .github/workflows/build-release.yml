@@ -43,14 +43,14 @@ jobs:
           cp volumenodex.desktop dist/Volumenodex/
           cp run_volumenodex.sh dist/Volumenodex/run.sh
           chmod +x dist/Volumenodex/Volumenodex dist/Volumenodex/run.sh
-          tar -czvf Volumenodex-v1.3.0-Linux-x86_64.tar.gz -C dist Volumenodex
+          tar -czvf Volumenodex-v2.0.0-Linux-x86_64.tar.gz -C dist Volumenodex
 
       - name: Upload Linux Asset to Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${GITHUB_REF_NAME:-v1.3.0}"
-          gh release upload "$TAG" Volumenodex-v1.3.0-Linux-x86_64.tar.gz --clobber || true
+          TAG="${GITHUB_REF_NAME:-v2.0.0}"
+          gh release upload "$TAG" Volumenodex-v2.0.0-Linux-x86_64.tar.gz --clobber || true
 
   build-macos:
     name: Build macOS Universal App & DMG
@@ -77,13 +77,13 @@ jobs:
       - name: Package macOS App Bundle into Zip and DMG
         run: |
           cd dist
-          zip -r -y ../Volumenodex-v1.3.0-macOS.zip Volumenodex.app
+          zip -r -y ../Volumenodex-v2.0.0-macOS.zip Volumenodex.app
           cd ..
-          hdiutil create -volname "Volumenodex" -srcfolder "dist/Volumenodex.app" -ov -format UDZO "Volumenodex-v1.3.0-macOS.dmg"
+          hdiutil create -volname "Volumenodex" -srcfolder "dist/Volumenodex.app" -ov -format UDZO "Volumenodex-v2.0.0-macOS.dmg"
 
       - name: Upload macOS Assets to Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${GITHUB_REF_NAME:-v1.3.0}"
-          gh release upload "$TAG" Volumenodex-v1.3.0-macOS.dmg Volumenodex-v1.3.0-macOS.zip --clobber || true
+          TAG="${GITHUB_REF_NAME:-v2.0.0}"
+          gh release upload "$TAG" Volumenodex-v2.0.0-macOS.dmg Volumenodex-v2.0.0-macOS.zip --clobber || true

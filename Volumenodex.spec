@@ -71,8 +71,8 @@ if sys.platform == 'darwin':
         info_plist={
             'CFBundleName': 'Volumenodex',
             'CFBundleDisplayName': 'Volumenodex Word Studio',
-            'CFBundleVersion': '1.3.0',
-            'CFBundleShortVersionString': '1.3.0',
+            'CFBundleVersion': '2.0.0',
+            'CFBundleShortVersionString': '2.0.0',
             'NSPrincipalClass': 'NSApplication',
             'NSHighResolutionCapable': 'True',
         },

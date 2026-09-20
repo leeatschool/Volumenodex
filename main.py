@@ -43,11 +43,16 @@ def main():
             pass
 
     if sys.platform == "win32":
-        try:
-            import ctypes
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("volumenodex.wordprocessing.studio.1.0")
-        except Exception:
-            pass
+        # Only set explicit AppUserModelID when running uncompiled in Python dev mode.
+        # When compiled as a standalone PE executable (sys.frozen), setting an unregistered
+        # AppUserModelID causes Windows Taskbar to show a generic placeholder icon for 60 seconds
+        # while attempting an Explorer shell lookup.
+        if not getattr(sys, "frozen", False):
+            try:
+                import ctypes
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("volumenodex.wordprocessing.studio.1.0")
+            except Exception:
+                pass
 
     try:
         qInstallMessageHandler(_qt_message_handler)
@@ -59,20 +64,52 @@ def main():
     app.setApplicationDisplayName("Volumenodex Word Studio")
     app.setOrganizationName("Volumenodex")
 
-    # Set application icon
+    # Set application icon (prioritizing multi-resolution .ico)
     from PySide6.QtGui import QIcon
+    base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
     icon_candidates = [
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icon.png"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "volumenodex", "resources", "app_icon.png"),
+        os.path.join(base_dir, "assets", "app_icon.ico"),
+        os.path.join(base_dir, "volumenodex", "resources", "app_icon.ico"),
+        os.path.join(os.path.dirname(sys.executable), "assets", "app_icon.ico"),
+        os.path.join(os.path.dirname(sys.executable), "_internal", "assets", "app_icon.ico"),
+        os.path.join(os.path.dirname(sys.executable), "app_icon.ico"),
+        os.path.join(base_dir, "assets", "icon.png"),
+        os.path.join(base_dir, "volumenodex", "resources", "app_icon.png"),
     ]
+    app_ico_path = None
     for p in icon_candidates:
         if os.path.exists(p):
             ico = QIcon(p)
             if not ico.isNull():
                 app.setWindowIcon(ico)
+                app_ico_path = p
                 break
 
     window = MainWindow()
+
+    # Synchronously bind native Win32 window icons for instant taskbar rendering
+    if app_ico_path:
+        window.setWindowIcon(QIcon(app_ico_path))
+        if sys.platform == "win32" and app_ico_path.lower().endswith(".ico"):
+            try:
+                import ctypes
+                hwnd = int(window.winId())
+                if hwnd:
+                    # WM_SETICON = 0x0080; ICON_SMALL = 0; ICON_BIG = 1
+                    # LR_LOADFROMFILE = 0x0010; LR_DEFAULTSIZE = 0x0040
+                    h_icon_big = ctypes.windll.user32.LoadImageW(
+                        0, app_ico_path, 1, 0, 0, 0x0010 | 0x00000040
+                    )
+                    h_icon_sm = ctypes.windll.user32.LoadImageW(
+                        0, app_ico_path, 1, 16, 16, 0x0010
+                    )
+                    if h_icon_big:
+                        ctypes.windll.user32.SendMessageW(hwnd, 0x0080, 1, h_icon_big)
+                    if h_icon_sm:
+                        ctypes.windll.user32.SendMessageW(hwnd, 0x0080, 0, h_icon_sm)
+            except Exception:
+                pass
+
     window.show()
     window.raise_()
     window.activateWindow()

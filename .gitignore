@@ -15,6 +15,7 @@ dist/
 *.egg-info/
 *.egg
 wheels/
+*.zip
 *.spec
 !Volumenodex.spec
 
