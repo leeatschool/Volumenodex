@@ -3,7 +3,8 @@
 import os
 import re
 import sys
-from typing import Optional, List, Dict, Any
+import json
+from typing import Optional, List, Dict, Any, Tuple
 from PySide6.QtCore import Qt, QSize, QUrl, QTimer, QThread
 from PySide6.QtGui import QIcon, QPixmap, QDesktopServices, QColor
 from PySide6.QtWidgets import (
@@ -240,6 +241,86 @@ class ClipArtDialog(QDialog):
         layout.addWidget(self.empty_card)
         self.empty_card.hide()
 
+        # Initial Search Prompt Card (Zero image decoding on open for instant load)
+        self.initial_card = QFrame()
+        self.initial_card.setStyleSheet("""
+            QFrame {
+                background-color: #1f2335;
+                border: 1px dashed #414868;
+                border-radius: 8px;
+                padding: 28px 20px;
+            }
+        """)
+        init_layout = QVBoxLayout(self.initial_card)
+        init_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        init_layout.setSpacing(12)
+
+        init_icon = QLabel("🎨")
+        init_icon.setStyleSheet("font-size: 40px;")
+        init_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        init_layout.addWidget(init_icon)
+
+        self.init_title = QLabel("Search to Explore 20,500+ Illustrations")
+        self.init_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #7aa2f7;")
+        self.init_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        init_layout.addWidget(self.init_title)
+
+        self.init_desc = QLabel(
+            "Type in the search bar above to see previews!\n"
+            "Illustrations load on demand so your studio opens and runs with zero lag."
+        )
+        self.init_desc.setStyleSheet("color: #a9b1d6; font-size: 13px; line-height: 1.5;")
+        self.init_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        init_layout.addWidget(self.init_desc)
+
+        # Quick Search Suggestion Tags
+        h_tags = QHBoxLayout()
+        h_tags.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        h_tags.setSpacing(8)
+        quick_tags = ["Animals", "Borders", "Vintage", "Nature", "Ornaments", "Frames", "Music"]
+        for tag in quick_tags:
+            btn_tag = QPushButton(tag)
+            btn_tag.setStyleSheet("""
+                QPushButton {
+                    background-color: #24283b;
+                    border: 1px solid #3b4261;
+                    border-radius: 12px;
+                    padding: 4px 12px;
+                    font-size: 11px;
+                    color: #c0caf5;
+                }
+                QPushButton:hover {
+                    background-color: #2e344e;
+                    border-color: #7aa2f7;
+                    color: #ffffff;
+                }
+            """)
+            btn_tag.clicked.connect(lambda _, t=tag: self.search_input.setText(t))
+            h_tags.addWidget(btn_tag)
+        init_layout.addLayout(h_tags)
+
+        # Browse All Button
+        btn_browse_all = QPushButton("✨ Browse All Illustrations")
+        btn_browse_all.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2c42;
+                color: #7aa2f7;
+                border: 1px dashed #7aa2f7;
+                border-radius: 6px;
+                padding: 8px 20px;
+                font-weight: 600;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: rgba(122, 162, 247, 0.15);
+                color: #ffffff;
+            }
+        """)
+        btn_browse_all.clicked.connect(self._on_browse_all_clicked)
+        init_layout.addWidget(btn_browse_all, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        layout.addWidget(self.initial_card)
+
         # No search results indicator
         self.no_results_card = QFrame()
         self.no_results_card.setStyleSheet("""
@@ -318,7 +399,7 @@ class ClipArtDialog(QDialog):
         layout.addLayout(bottom_bar)
 
     def _scan_library_files(self) -> None:
-        """Rapidly discovers files on disk without blocking or decoding bitmaps up-front."""
+        """Rapidly builds in-memory metadata lookup chart without decoding any images up-front."""
         self._all_records.clear()
         self.list_widget.clear()
         self._displayed_count = 0
@@ -326,35 +407,68 @@ class ClipArtDialog(QDialog):
         self.btn_load_more.hide()
 
         if not os.path.isdir(self.clipart_dir):
+            if hasattr(self, "initial_card"):
+                self.initial_card.hide()
             self.empty_card.show()
             self.list_widget.hide()
             self.lbl_stats.setText("0 illustrations")
             return
 
+        # Check for pre-built index file for instantaneous sub-100ms loading
+        index_candidates = [
+            os.path.join(self.clipart_dir, "clipart_index.json"),
+            os.path.join(self.clipart_dir, "..", "clipart_index.json"),
+        ]
         discovered: List[Dict[str, Any]] = []
-        for root, _, files in os.walk(self.clipart_dir):
-            for f in sorted(files):
-                ext = os.path.splitext(f)[1].lower()
-                if ext in self.SUPPORTED_EXTENSIONS:
-                    full_p = os.path.join(root, f)
-                    raw_title, _ = os.path.splitext(f)
-                    clean_title = raw_title.replace("_", " ").replace("-", " ").strip().title()
-                    rel_dir = os.path.relpath(root, self.clipart_dir)
-                    cat = "" if rel_dir == "." else rel_dir.replace("\\", " / ")
+        loaded_from_index = False
+        for idx_path in index_candidates:
+            if idx_path and os.path.exists(idx_path):
+                try:
+                    with open(idx_path, "r", encoding="utf-8") as f:
+                        cached_items = json.load(f)
+                    sample_path = os.path.normpath(os.path.join(self.clipart_dir, cached_items[0]["rel"])) if cached_items else ""
+                    if sample_path and os.path.exists(sample_path):
+                        for item in cached_items:
+                            full_p = os.path.normpath(os.path.join(self.clipart_dir, item["rel"]))
+                            discovered.append({
+                                "path": full_p,
+                                "title": item.get("title", ""),
+                                "raw": item.get("raw", ""),
+                                "category": item.get("category", ""),
+                                "filename": item.get("filename", os.path.basename(full_p)),
+                                "ext": item.get("ext", os.path.splitext(full_p)[1]),
+                            })
+                        loaded_from_index = True
+                        break
+                except Exception:
+                    pass
 
-                    discovered.append({
-                        "path": full_p,
-                        "title": clean_title,
-                        "raw": raw_title,
-                        "category": cat,
-                        "filename": f,
-                        "ext": ext,
-                    })
+        if not loaded_from_index:
+            for root, _, files in os.walk(self.clipart_dir):
+                for f in sorted(files):
+                    ext = os.path.splitext(f)[1].lower()
+                    if ext in self.SUPPORTED_EXTENSIONS:
+                        full_p = os.path.join(root, f)
+                        raw_title, _ = os.path.splitext(f)
+                        clean_title = raw_title.replace("_", " ").replace("-", " ").strip().title()
+                        rel_dir = os.path.relpath(root, self.clipart_dir)
+                        cat = "" if rel_dir == "." else rel_dir.replace("\\", " / ")
+
+                        discovered.append({
+                            "path": full_p,
+                            "title": clean_title,
+                            "raw": raw_title,
+                            "category": cat,
+                            "filename": f,
+                            "ext": ext,
+                        })
 
         self._all_records = discovered
         self._indexed_items = discovered
         total = len(discovered)
         if total == 0:
+            if hasattr(self, "initial_card"):
+                self.initial_card.hide()
             self.empty_card.show()
             self.list_widget.hide()
             self.btn_insert.setEnabled(False)
@@ -362,11 +476,26 @@ class ClipArtDialog(QDialog):
             return
 
         self.empty_card.hide()
-        self.list_widget.show()
-        self.lbl_stats.setText(f"{total:,} illustration{'s' if total != 1 else ''} in library")
-        self._run_filter()
+        self.list_widget.hide()
+        if hasattr(self, "initial_card"):
+            self.initial_card.show()
+        self.btn_insert.setEnabled(False)
+        self.lbl_stats.setText(f"{total:,} illustrations ready to search")
 
     _load_library = _scan_library_files
+
+    def _on_browse_all_clicked(self) -> None:
+        """Renders library illustrations on demand when explicitly requested."""
+        if hasattr(self, "initial_card"):
+            self.initial_card.hide()
+        self.no_results_card.hide()
+        self.list_widget.show()
+        self._current_matches = self._all_records
+        self.list_widget.clear()
+        self._displayed_count = 0
+        self._render_match_batch(self._batch_size)
+        total = len(self._all_records)
+        self.lbl_stats.setText(f"Showing {min(self._displayed_count, total)} of {total:,} illustrations")
 
     def _on_search_text_changed(self, text: str) -> None:
         self._load_more_clicks = 0
@@ -379,35 +508,45 @@ class ClipArtDialog(QDialog):
         self.list_widget.clear()
         self._displayed_count = 0
 
+        # When no query is entered: show initial prompt card with zero image decoding
         if not query:
-            self._current_matches = self._all_records
+            self.list_widget.hide()
+            self.no_results_card.hide()
+            if hasattr(self, "initial_card"):
+                self.initial_card.show()
             self.btn_load_more.hide()
-        else:
-            matches = []
-            for rec in self._all_records:
-                title = rec["title"].lower()
-                raw = rec["raw"].lower()
-                cat = rec["category"].lower()
+            self.btn_insert.setEnabled(False)
+            total = len(self._all_records)
+            self.lbl_stats.setText(f"{total:,} illustrations ready to search")
+            return
 
-                # Check filename and title first (instant match)
-                if all(t in title or t in raw or t in cat for t in search_terms):
+        if hasattr(self, "initial_card"):
+            self.initial_card.hide()
+
+        matches = []
+        for rec in self._all_records:
+            title = rec["title"].lower()
+            raw = rec["raw"].lower()
+            cat = rec["category"].lower()
+
+            # Check filename and title first (instant match)
+            if all(t in title or t in raw or t in cat for t in search_terms):
+                matches.append(rec)
+                continue
+
+            # Query cached metadata (EXIF description, tags, keywords, artist)
+            meta = self._metadata_cache.get_metadata(rec["path"])
+            if meta:
+                meta_text = (
+                    f"{meta.get('keywords', '')} "
+                    f"{meta.get('description', '')} "
+                    f"{meta.get('artist', '')} "
+                    f"{meta.get('comments', '')}"
+                ).lower()
+                if all(t in title or t in raw or t in cat or t in meta_text for t in search_terms):
                     matches.append(rec)
-                    continue
 
-                # Query cached metadata (EXIF description, tags, keywords, artist)
-                meta = self._metadata_cache.get_metadata(rec["path"])
-                if meta:
-                    meta_text = (
-                        f"{meta.get('keywords', '')} "
-                        f"{meta.get('description', '')} "
-                        f"{meta.get('artist', '')} "
-                        f"{meta.get('comments', '')}"
-                    ).lower()
-                    if all(t in title or t in raw or t in cat or t in meta_text for t in search_terms):
-                        matches.append(rec)
-
-            self._current_matches = matches
-
+        self._current_matches = matches
         total_matches = len(self._current_matches)
 
         if total_matches == 0:
@@ -421,15 +560,11 @@ class ClipArtDialog(QDialog):
             self._render_match_batch(self._batch_size)
 
         # Update stats text
-        if query:
-            self.lbl_stats.setText(f"Showing {min(self._displayed_count, total_matches)} of {total_matches} matches (from {len(self._all_records):,} in library)")
-            self.btn_load_more.show()
-        else:
-            self.lbl_stats.setText(f"Showing {min(self._displayed_count, total_matches)} of {total_matches:,} illustrations")
-            self.btn_load_more.hide()
+        self.lbl_stats.setText(f"Showing {min(self._displayed_count, total_matches)} of {total_matches} matches (from {len(self._all_records):,} in library)")
+        self.btn_load_more.show()
 
         # Trigger Clipart Library Autoexpansion if results < 3 and query entered
-        if query and total_matches < 3:
+        if total_matches < 3:
             self._trigger_autoexpansion(query, offset=0, max_images=5)
 
     def _on_scroll(self, val: int) -> None:

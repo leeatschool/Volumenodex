@@ -85,6 +85,49 @@ def main():
                 app_ico_path = p
                 break
 
+    # Instant splash screen for zero-lag startup feedback
+    splash = None
+    if "--no-splash" not in sys.argv and "pytest" not in sys.modules:
+        try:
+            from PySide6.QtWidgets import QSplashScreen
+            from PySide6.QtGui import QPixmap, QPainter, QColor, QFont, QPen
+            splash_pixmap = QPixmap(420, 220)
+            splash_pixmap.fill(QColor(18, 20, 26))
+
+            painter = QPainter(splash_pixmap)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+            pen = QPen(QColor(45, 52, 70), 1.5)
+            painter.setPen(pen)
+            painter.drawRoundedRect(1, 1, 418, 218, 10, 10)
+
+            if app_ico_path and os.path.exists(app_ico_path):
+                icon_pix = QIcon(app_ico_path).pixmap(64, 64)
+                if not icon_pix.isNull():
+                    painter.drawPixmap(30, 45, icon_pix)
+
+            painter.setPen(QColor(240, 243, 250))
+            font_title = QFont("Segoe UI", 18, QFont.Weight.Bold)
+            painter.setFont(font_title)
+            painter.drawText(112, 75, "Volumenodex")
+
+            painter.setPen(QColor(140, 150, 175))
+            font_sub = QFont("Segoe UI", 10)
+            painter.setFont(font_sub)
+            painter.drawText(114, 100, "Word Processing Studio  •  v2.0")
+
+            painter.setPen(QColor(100, 112, 140))
+            font_status = QFont("Segoe UI", 9)
+            painter.setFont(font_status)
+            painter.drawText(32, 185, "Initializing workspace...")
+            painter.end()
+
+            splash = QSplashScreen(splash_pixmap, Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint)
+            splash.show()
+            app.processEvents()
+        except Exception:
+            splash = None
+
     window = MainWindow()
 
     # Synchronously bind native Win32 window icons for instant taskbar rendering
@@ -113,6 +156,9 @@ def main():
     window.show()
     window.raise_()
     window.activateWindow()
+
+    if splash is not None:
+        splash.finish(window)
 
     sys.exit(app.exec())
 

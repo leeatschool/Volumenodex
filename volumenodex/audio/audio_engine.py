@@ -60,18 +60,30 @@ class AudioEngine(QObject):
 
         self.ambient_preset = AmbientSoundPreset.OFF
 
-        # Ambient background loop player
-        self._ambient_player = QMediaPlayer(self)
-        self._ambient_output = QAudioOutput(self)
-        self._ambient_player.setAudioOutput(self._ambient_output)
-        self._ambient_player.setLoops(QMediaPlayer.Infinite)
-        self._ambient_output.setVolume(self._ambient_volume)
+        # Ambient background loop player (lazily instantiated on first use to avoid FFmpeg startup delay)
+        self._ambient_player_inst: Optional[QMediaPlayer] = None
+        self._ambient_output_inst: Optional[QAudioOutput] = None
 
         # File watcher for automatic updates when sounds directory changes
         self._watcher = QFileSystemWatcher(self)
         if os.path.exists(self.sounds_dir):
             self._watcher.addPath(self.sounds_dir)
         self._watcher.directoryChanged.connect(self._on_sounds_dir_changed)
+
+    @property
+    def _ambient_player(self) -> QMediaPlayer:
+        if self._ambient_player_inst is None:
+            self._ambient_player_inst = QMediaPlayer(self)
+            self._ambient_output_inst = QAudioOutput(self)
+            self._ambient_player_inst.setAudioOutput(self._ambient_output_inst)
+            self._ambient_player_inst.setLoops(QMediaPlayer.Infinite)
+            self._ambient_output_inst.setVolume(self._ambient_volume)
+        return self._ambient_player_inst
+
+    @property
+    def _ambient_output(self) -> QAudioOutput:
+        _ = self._ambient_player
+        return self._ambient_output_inst
 
     @staticmethod
     def _resolve_base_dir(base_dir: Optional[str] = None) -> str:
@@ -269,7 +281,8 @@ class AudioEngine(QObject):
     def set_ambient_preset(self, preset: Union[AmbientSoundPreset, str]) -> None:
         self.ambient_preset = preset
         if preset in (AmbientSoundPreset.OFF, "None (Quiet Room)", "Off (Silent)", "Off", "off"):
-            self._ambient_player.stop()
+            if self._ambient_player_inst is not None:
+                self._ambient_player.stop()
             return
 
         # Custom ambient audio file
@@ -334,7 +347,8 @@ class AudioEngine(QObject):
     def set_ambient_volume(self, volume_percent: int) -> None:
         vol = max(0.0, min(1.0, volume_percent / 100.0))
         self._ambient_volume = vol
-        self._ambient_output.setVolume(vol)
+        if self._ambient_output_inst is not None:
+            self._ambient_output.setVolume(vol)
 
     def set_effects_volume(self, volume_percent: int) -> None:
         vol = max(0.0, min(1.0, volume_percent / 100.0))

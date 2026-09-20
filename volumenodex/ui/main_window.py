@@ -2,6 +2,7 @@
 
 import html
 import os
+import sys
 from datetime import datetime
 from typing import Optional
 from PySide6.QtCore import Qt, QTime, QDate, QTimer, QThreadPool, QThread, Signal
@@ -45,7 +46,6 @@ from volumenodex.review.revision_worker import ReviewWorker, ReviewAnalysisWorke
 from volumenodex.academic.citation_model import CitationManager, CitationEntry, CitationFormatter
 from volumenodex.academic.citation_drawer import CitationGeneratorDrawer
 from volumenodex.ui.new_document_dialog import NewDocumentDialog
-from volumenodex.ui.clipart_dialog import ClipArtDialog
 from volumenodex.core.image_utils import IMAGE_FILE_FILTER, load_image
 from volumenodex.core.settings_manager import SettingsManager
 from volumenodex.ui.settings_dialog import SettingsDialog
@@ -204,17 +204,12 @@ class MainWindow(QMainWindow):
         center_layout.addWidget(self.canvas_area, stretch=1)
         self.editor_splitter.addWidget(center_container)
 
-        # Secondary Split Screen Pane
+        # Secondary Split Screen Pane (Lazily instantiated on first split-screen toggle)
         self.secondary_container = QWidget(self.editor_splitter)
-        sec_layout = QVBoxLayout(self.secondary_container)
-        sec_layout.setContentsMargins(0, 0, 0, 0)
-        sec_layout.setSpacing(0)
-        self.secondary_canvas = PaginatedCanvas(
-            self.layout_model, self.texture_engine, self.theme_manager, self.secondary_container
-        )
-        self.secondary_canvas.spell_engine = self.spell_engine
-        self.secondary_canvas.set_document(self.canvas_area.document())
-        sec_layout.addWidget(self.secondary_canvas, stretch=1)
+        self.secondary_layout = QVBoxLayout(self.secondary_container)
+        self.secondary_layout.setContentsMargins(0, 0, 0, 0)
+        self.secondary_layout.setSpacing(0)
+        self.secondary_canvas = None
         self.secondary_container.hide()
         self.editor_splitter.addWidget(self.secondary_container)
 
@@ -1216,6 +1211,7 @@ class MainWindow(QMainWindow):
                 if not clipart_dir:
                     clipart_dir = candidates[0] if candidates else ""
 
+            from volumenodex.ui.clipart_dialog import ClipArtDialog
             dlg = ClipArtDialog(clipart_dir, settings_manager=self.settings_manager, parent=self)
             dlg.setWindowModality(Qt.WindowModality.ApplicationModal)
         except Exception as e:
@@ -1488,7 +1484,7 @@ class MainWindow(QMainWindow):
         self._schedule_revision_analysis()
         self.settings_manager.add_recent_file(path)
         self._rebuild_recent_menu()
-        if hasattr(self, "secondary_canvas"):
+        if getattr(self, "secondary_canvas", None) is not None:
             self.secondary_canvas.set_document(self.canvas_area.document())
         return True
 
@@ -1712,6 +1708,19 @@ class MainWindow(QMainWindow):
             else:
                 QMessageBox.warning(self, "Export Failed", f"Could not export plain text to:\n{path}")
 
+    def _ensure_secondary_canvas(self) -> PaginatedCanvas:
+        """Lazily creates and attaches the secondary canvas editor on first use."""
+        if self.secondary_canvas is None:
+            self.secondary_canvas = PaginatedCanvas(
+                self.layout_model, self.texture_engine, self.theme_manager, self.secondary_container
+            )
+            self.secondary_canvas.spell_engine = self.spell_engine
+            self.secondary_canvas.set_document(self.canvas_area.document())
+            self.secondary_canvas.typewriter_scrolling = self.canvas_area.typewriter_scrolling
+            self.secondary_canvas.dark_paper = self.canvas_area.dark_paper
+            self.secondary_layout.addWidget(self.secondary_canvas, stretch=1)
+        return self.secondary_canvas
+
     def toggle_split_screen(self) -> None:
         """Toggles horizontal dual split-screen side-by-side workspace."""
         is_shown = not self.secondary_container.isHidden()
@@ -1722,7 +1731,8 @@ class MainWindow(QMainWindow):
             if hasattr(self.ribbon, "btn_split_screen"):
                 self.ribbon.btn_split_screen.setChecked(False)
         else:
-            self.secondary_canvas.set_document(self.canvas_area.document())
+            canvas = self._ensure_secondary_canvas()
+            canvas.set_document(self.canvas_area.document())
             self.secondary_container.show()
             self.editor_splitter.setSizes([self.width() // 2, self.width() // 2])
             if hasattr(self, "act_split_screen"):
@@ -1735,7 +1745,7 @@ class MainWindow(QMainWindow):
         if enabled is None:
             enabled = not self.canvas_area.typewriter_scrolling
         self.canvas_area.typewriter_scrolling = enabled
-        if hasattr(self, "secondary_canvas"):
+        if getattr(self, "secondary_canvas", None) is not None:
             self.secondary_canvas.typewriter_scrolling = enabled
         if hasattr(self, "act_typewriter_scroll"):
             self.act_typewriter_scroll.setChecked(enabled)
@@ -1788,7 +1798,7 @@ class MainWindow(QMainWindow):
         )
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self.canvas_area.viewport().update()
-            if hasattr(self, "secondary_canvas"):
+            if getattr(self, "secondary_canvas", None) is not None:
                 self.secondary_canvas.viewport().update()
 
     def _show_statistics_dialog(self) -> None:

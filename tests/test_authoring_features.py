@@ -309,8 +309,10 @@ def test_clipart_dialog_search_and_robustness(app):
 
         dlg = ClipArtDialog(tmpdir)
         dlg.show()
-        assert dlg.list_widget.count() == 4
+        # Zero images loaded initially for sub-second startup
         assert len(dlg._indexed_items) == 4
+        assert dlg.list_widget.count() == 0
+        assert not dlg.initial_card.isHidden()
 
         # Search for dragon
         dlg.search_input.setText("dragon")
@@ -330,9 +332,14 @@ def test_clipart_dialog_search_and_robustness(app):
         assert len(visible_none) == 0
         assert not dlg.no_results_card.isHidden()
 
-        # Clear search
+        # Clear search: returns to initial prompt card
         dlg.btn_clear_search.click()
         assert dlg.search_input.text() == ""
+        assert dlg.list_widget.count() == 0
+        assert not dlg.initial_card.isHidden()
+
+        # Browse all explicitly: renders all 4 items
+        dlg._on_browse_all_clicked()
         visible_all = [dlg.list_widget.item(i) for i in range(dlg.list_widget.count()) if not dlg.list_widget.item(i).isHidden()]
         assert len(visible_all) == 4
 
