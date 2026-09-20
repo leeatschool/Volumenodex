@@ -4,7 +4,7 @@ setlocal enabledelayedexpansion
 title Volumenodex Installer
 cls
 echo ======================================================================
-echo                     Volumenodex v1.1.0 Installer
+echo                     Volumenodex v1.3.0 Installer
 echo ======================================================================
 echo.
 echo Installing Volumenodex to your local application directory...

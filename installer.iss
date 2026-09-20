@@ -1,6 +1,6 @@
 ; Script generated for Inno Setup 6
 #define MyAppName "Volumenodex"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.3.0"
 #define MyAppPublisher "Volumenodex"
 #define MyAppExeName "Volumenodex.exe"
 
@@ -13,7 +13,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=C:\Users\Aaron\Downloads\Volumenodex-v1.0.0-Windows-x64
-OutputBaseFilename=Volumenodex-v1.1.0-Setup
+OutputBaseFilename=Volumenodex-v1.3.0-Setup
 SetupIconFile=C:\Users\Aaron\Downloads\Volumenodex-v1.0.0-Windows-x64\app_icon.ico
 Compression=lzma2/max
 SolidCompression=yes

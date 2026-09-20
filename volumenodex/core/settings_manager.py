@@ -31,6 +31,17 @@ class SettingsManager(QObject):
         self.daily_word_goal: int = 1000
         self.daily_words_date: str = ""
         self.daily_words_count: int = 0
+
+        # Clipart Library & Autoexpansion Preferences
+        self.clipart_autoexpansion_enabled: bool = True
+        self.clipart_autoexpansion_size: str = "500px"  # "500px", "1000px", "full"
+        self.clipart_size_limit_val: float = 2.0
+        self.clipart_size_limit_unit: str = "GB"  # "KB", "MB", "GB", "TB"
+        self.clipart_license_pd_cc0: bool = True
+        self.clipart_license_cc_by: bool = False
+        self.clipart_license_cc_by_sa: bool = False
+        self.clipart_library_dir: str = ""
+
         self.load()
 
     def load(self) -> None:
@@ -101,6 +112,24 @@ class SettingsManager(QObject):
             self.daily_words_date = today_str
             self.daily_words_count = 0
 
+        # Load clipart autoexpansion settings
+        val_autoexp = self._settings.value("clipart/autoexpansion_enabled", True)
+        self.clipart_autoexpansion_enabled = val_autoexp.lower() in ("true", "1") if isinstance(val_autoexp, str) else bool(val_autoexp)
+        self.clipart_autoexpansion_size = str(self._settings.value("clipart/autoexpansion_size", "500px"))
+        try:
+            self.clipart_size_limit_val = float(self._settings.value("clipart/size_limit_val", 2.0))
+        except (ValueError, TypeError):
+            self.clipart_size_limit_val = 2.0
+        self.clipart_size_limit_unit = str(self._settings.value("clipart/size_limit_unit", "GB"))
+
+        val_pd = self._settings.value("clipart/license_pd_cc0", True)
+        self.clipart_license_pd_cc0 = val_pd.lower() in ("true", "1") if isinstance(val_pd, str) else bool(val_pd)
+        val_by = self._settings.value("clipart/license_cc_by", False)
+        self.clipart_license_cc_by = val_by.lower() in ("true", "1") if isinstance(val_by, str) else bool(val_by)
+        val_sa = self._settings.value("clipart/license_cc_by_sa", False)
+        self.clipart_license_cc_by_sa = val_sa.lower() in ("true", "1") if isinstance(val_sa, str) else bool(val_sa)
+        self.clipart_library_dir = str(self._settings.value("clipart/library_dir", ""))
+
     def save(self) -> None:
         """Saves current configuration to persistent storage."""
         self._settings.setValue("autosave/enabled", self.autosave_enabled)
@@ -112,6 +141,17 @@ class SettingsManager(QObject):
         self._settings.setValue("writing/daily_word_goal", self.daily_word_goal)
         self._settings.setValue("writing/daily_words_date", self.daily_words_date)
         self._settings.setValue("writing/daily_words_count", self.daily_words_count)
+
+        # Save clipart settings
+        self._settings.setValue("clipart/autoexpansion_enabled", self.clipart_autoexpansion_enabled)
+        self._settings.setValue("clipart/autoexpansion_size", self.clipart_autoexpansion_size)
+        self._settings.setValue("clipart/size_limit_val", self.clipart_size_limit_val)
+        self._settings.setValue("clipart/size_limit_unit", self.clipart_size_limit_unit)
+        self._settings.setValue("clipart/license_pd_cc0", self.clipart_license_pd_cc0)
+        self._settings.setValue("clipart/license_cc_by", self.clipart_license_cc_by)
+        self._settings.setValue("clipart/license_cc_by_sa", self.clipart_license_cc_by_sa)
+        self._settings.setValue("clipart/library_dir", self.clipart_library_dir)
+
         self._settings.sync()
         self.settingsChanged.emit()
 

@@ -148,6 +148,7 @@ class RibbonBar(QWidget):
     # Document & Studio Header signals
     saveRequested = Signal()
     printRequested = Signal()
+    printPreviewRequested = Signal()
     settingsRequested = Signal()
     writersReferenceRequested = Signal()
 
@@ -270,6 +271,34 @@ class RibbonBar(QWidget):
         """)
         self.btn_header_print.clicked.connect(self.printRequested.emit)
         left_layout.addWidget(self.btn_header_print)
+
+        self.btn_header_preview = QPushButton("Preview")
+        self.btn_header_preview.setObjectName("headerPreviewBtn")
+        self.btn_header_preview.setIcon(VectorIconFactory.create_icon("view", color="#c0caf5", size=16))
+        self.btn_header_preview.setIconSize(QSize(16, 16))
+        self.btn_header_preview.setToolTip("High-Fidelity Print Preview (Ctrl+Shift+P)")
+        self.btn_header_preview.setStyleSheet("""
+            QPushButton#headerPreviewBtn {
+                background-color: #24283b;
+                color: #c0caf5;
+                border: 1px solid #3b4261;
+                border-radius: 4px;
+                padding: 3px 10px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton#headerPreviewBtn:hover {
+                background-color: #2e344e;
+                border-color: #7aa2f7;
+                color: #ffffff;
+            }
+            QPushButton#headerPreviewBtn:pressed {
+                background-color: #7aa2f7;
+                color: #1a1b26;
+            }
+        """)
+        self.btn_header_preview.clicked.connect(self.printPreviewRequested.emit)
+        left_layout.addWidget(self.btn_header_preview)
 
         self.btn_header_reference = QPushButton("Writers Reference")
         self.btn_header_reference.setObjectName("headerRefBtn")

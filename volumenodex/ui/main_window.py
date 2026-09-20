@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QColorDialog, QMessageBox, QApplication, QStackedWidget, QInputDialog,
     QSplitter, QDialog
 )
-from PySide6.QtPrintSupport import QPrinter, QPrintDialog
+from PySide6.QtPrintSupport import QPrinter, QPrintDialog, QPrintPreviewDialog
 
 from volumenodex.core.document_model import (
     PageLayoutModel, PaperSizePreset, Orientation, PageMargins, DocumentStatistics,
@@ -46,6 +46,7 @@ from volumenodex.academic.citation_model import CitationManager, CitationEntry, 
 from volumenodex.academic.citation_drawer import CitationGeneratorDrawer
 from volumenodex.ui.new_document_dialog import NewDocumentDialog
 from volumenodex.ui.clipart_dialog import ClipArtDialog
+from volumenodex.core.image_utils import IMAGE_FILE_FILTER, load_image
 from volumenodex.core.settings_manager import SettingsManager
 from volumenodex.ui.settings_dialog import SettingsDialog
 
@@ -310,6 +311,11 @@ class MainWindow(QMainWindow):
         act_print.setShortcut(QKeySequence.StandardKey.Print)
         act_print.triggered.connect(lambda: self.print_document(low_ink=False))
         file_menu.addAction(act_print)
+
+        self.action_print_preview = QAction("Print Preview...", self)
+        self.action_print_preview.setShortcut(QKeySequence("Ctrl+Shift+P"))
+        self.action_print_preview.triggered.connect(self.print_preview)
+        file_menu.addAction(self.action_print_preview)
 
         act_print_low_ink = QAction("Print (Low-Ink Mode)...", self)
         act_print_low_ink.triggered.connect(lambda: self.print_document(low_ink=True))
@@ -657,8 +663,11 @@ class MainWindow(QMainWindow):
         self.ribbon.saveRequested.connect(self.save_document)
         self.ribbon.settingsRequested.connect(self._show_settings_dialog)
         self.ribbon.printRequested.connect(lambda: self.print_document(low_ink=False))
+        self.ribbon.printPreviewRequested.connect(self.print_preview)
         if hasattr(self.ribbon, "btn_header_print"):
             self.ribbon.btn_header_print.clicked.connect(lambda: self.print_document(low_ink=False))
+        if hasattr(self.ribbon, "btn_header_preview"):
+            self.ribbon.btn_header_preview.clicked.connect(self.print_preview)
         self.ribbon.writersReferenceRequested.connect(self.open_writers_reference)
 
         # Status Bar Daily Goal Progress Ring
@@ -1143,12 +1152,12 @@ class MainWindow(QMainWindow):
             self.status_bar.set_message(f"Applied custom style '{style_name}'.")
 
     def _on_insert_image(self) -> None:
-        """Opens a file dialog to insert any computer image into the manuscript."""
+        """Opens a file dialog to insert any computer image into the manuscript with JXL prioritization."""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Insert Picture",
             "",
-            "Image Files (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.svg);;All Files (*)"
+            IMAGE_FILE_FILTER
         )
         if file_path:
             success = self.canvas_area.insert_image(file_path)
@@ -1158,12 +1167,25 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Image Error", "Unable to load the selected image file.")
 
     def _on_insert_clip_art(self) -> None:
-        """Opens the Clip Art Library dialog to select or browse clip art."""
-        clipart_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "assets", "clipart"))
-        dlg = ClipArtDialog(clipart_dir, parent=self)
+        """Opens the Clip Art Library dialog to select, search, or autoexpand clip art."""
+        clipart_dir = getattr(self.settings_manager, "clipart_library_dir", "") if self.settings_manager else ""
+        if not clipart_dir or not os.path.exists(clipart_dir):
+            base_dir = getattr(sys, '_MEIPASS', os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+            bundled_dir = os.path.join(base_dir, "assets", "clipart")
+            if os.path.exists(bundled_dir) and len(os.listdir(bundled_dir)) > 1:
+                clipart_dir = bundled_dir
+            elif os.path.exists(r"C:\Users\Aaron\Pictures\Compressed Clip Art"):
+                clipart_dir = r"C:\Users\Aaron\Pictures\Compressed Clip Art"
+            else:
+                clipart_dir = bundled_dir
+
+        dlg = ClipArtDialog(clipart_dir, settings_manager=self.settings_manager, parent=self)
         if dlg.exec():
             if dlg.selected_file:
-                success = self.canvas_area.insert_image(dlg.selected_file)
+                success = self.canvas_area.insert_image(
+                    dlg.selected_file,
+                    attribution_text=dlg.selected_attribution
+                )
                 if success:
                     self.status_bar.set_message(f"Inserted clip art: {os.path.basename(dlg.selected_file)}")
                 else:
@@ -1551,6 +1573,16 @@ class MainWindow(QMainWindow):
             "Document sent to printer in Low-Ink Mode." if low_ink else "Document sent to printer.", 3000
         )
 
+    def print_preview(self) -> None:
+        """Interactive high-fidelity print preview dialog."""
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        printer.setDocName(os.path.basename(self.current_file_path or "Manuscript"))
+        preview = QPrintPreviewDialog(printer, self)
+        preview.setWindowTitle("Print Preview — Volumenodex")
+        preview.resize(1060, 780)
+        preview.paintRequested.connect(lambda p: self.canvas_area.document().print_(p))
+        preview.exec()
+
     def export_pdf(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
             self, "Export to PDF", "Manuscript.pdf", "PDF Document (*.pdf)"
@@ -1808,9 +1840,19 @@ class MainWindow(QMainWindow):
 
     def _stop_threads(self) -> None:
         try:
-            if hasattr(self, "_review_thread") and self._review_thread is not None and self._review_thread.isRunning():
-                self._review_thread.quit()
-                self._review_thread.wait(500)
+            th = getattr(self, "_review_thread", None)
+            if th is not None:
+                try:
+                    import shiboken6
+                    if not shiboken6.isValid(th):
+                        return
+                except ImportError:
+                    pass
+                if th.isRunning():
+                    th.quit()
+                    if not th.wait(500):
+                        th.terminate()
+                        th.wait(200)
         except Exception:
             pass
 

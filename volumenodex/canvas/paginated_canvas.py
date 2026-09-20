@@ -4,7 +4,7 @@ import os
 import re
 import math
 from typing import Optional, List, Any, Tuple
-from PySide6.QtCore import Qt, Signal, QRectF, QRect, QPointF, QPoint, QTimer, QSize, QSizeF, QUrl
+from PySide6.QtCore import Qt, Signal, QRectF, QRect, QPointF, QPoint, QTimer, QSize, QSizeF, QUrl, QMimeData
 from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QFont, QTextCursor, QTextDocument,
     QAbstractTextDocumentLayout, QTextCharFormat, QTextBlockFormat,
@@ -13,7 +13,7 @@ from PySide6.QtGui import (
     QTextTableFormat, QTextTable, QTextLength, QPalette
 )
 from PySide6.QtWidgets import (
-    QAbstractScrollArea, QScrollBar, QApplication, QMenu
+    QAbstractScrollArea, QScrollBar, QApplication, QMenu, QFileDialog, QMessageBox
 )
 
 from volumenodex.core.document_model import PageLayoutModel, DPI_SCREEN, PageMargins
@@ -21,6 +21,7 @@ from volumenodex.canvas.paper_texture import PaperTextureEngine, TextureType
 from volumenodex.core.theme_manager import ThemeManager
 from volumenodex.core.header_footer_model import HeaderFooterModel, PageHeaderFooterConfig
 from volumenodex.core.note_model import NoteManager, Footnote
+from volumenodex.core.image_utils import load_image, load_pixmap, save_image, IMAGE_FILE_FILTER
 from volumenodex.review.lens_engine import LensFinding
 
 
@@ -156,8 +157,95 @@ class PaginatedCanvas(QAbstractScrollArea):
 
     def _on_doc_contents_changed(self) -> None:
         self._update_scroll_bars()
+        self.ensure_cursor_visible()
         self.textChanged.emit()
         self.viewport().update()
+
+    def ensure_cursor_visible(self, padding_bottom: int = 60, padding_top: int = 40) -> None:
+        """Ensures the active cursor line is comfortably visible within the scroll area.
+        When Enter is struck or text wraps to a new line and would be off the viewable area,
+        the document automatically shifts down."""
+        if not self._doc:
+            return
+
+        block = self._doc.findBlock(self._cursor.position())
+        if not block.isValid():
+            return
+
+        rect = self._doc.documentLayout().blockBoundingRect(block)
+        tl = block.layout()
+        line = tl.lineForTextPosition(self._cursor.positionInBlock()) if tl else None
+
+        if line and line.isValid():
+            doc_y_top = rect.top() + line.y()
+            doc_y_bot = doc_y_top + line.height()
+        else:
+            doc_y_top = rect.top()
+            doc_y_bot = rect.bottom()
+
+        ph_print = self.layout_model.printable_height_px
+        if ph_print <= 0:
+            return
+
+        p_idx = max(0, int(doc_y_bot // ph_print))
+        y_in_page_bot = doc_y_bot - (p_idx * ph_print)
+        y_in_page_top = max(0.0, doc_y_top - (p_idx * ph_print))
+
+        top_padding = 36
+        gutter = 36
+        ph = self.layout_model.page_height_px
+        my = self.layout_model.margin_top_px
+
+        canvas_cursor_bot = top_padding + p_idx * (ph + gutter) + my + y_in_page_bot
+        canvas_cursor_top = top_padding + p_idx * (ph + gutter) + my + y_in_page_top
+
+        vh = self.viewport().height()
+        if vh <= 0:
+            return
+
+        sy = self.verticalScrollBar().value()
+
+        if getattr(self, "typewriter_scrolling", False):
+            self._apply_typewriter_scrolling()
+            return
+
+        if canvas_cursor_bot + padding_bottom > sy + vh:
+            new_sy = int(canvas_cursor_bot + padding_bottom - vh)
+            new_sy = min(self.verticalScrollBar().maximum(), max(0, new_sy))
+            self.verticalScrollBar().setValue(new_sy)
+        elif canvas_cursor_top - padding_top < sy:
+            new_sy = int(canvas_cursor_top - padding_top)
+            new_sy = max(0, min(self.verticalScrollBar().maximum(), new_sy))
+            self.verticalScrollBar().setValue(new_sy)
+
+    def _apply_typewriter_scrolling(self) -> None:
+        """Keeps the active typing line centered vertically in the viewport."""
+        if not self._doc:
+            return
+        block = self._doc.findBlock(self._cursor.position())
+        if not block.isValid():
+            return
+        rect = self._doc.documentLayout().blockBoundingRect(block)
+        tl = block.layout()
+        line = tl.lineForTextPosition(self._cursor.positionInBlock()) if tl else None
+        doc_y = rect.top() + (line.y() if line and line.isValid() else 0.0)
+
+        ph_print = self.layout_model.printable_height_px
+        if ph_print <= 0:
+            return
+        p_idx = max(0, int(doc_y // ph_print))
+        y_in_page = doc_y - (p_idx * ph_print)
+
+        top_padding = 36
+        gutter = 36
+        ph = self.layout_model.page_height_px
+        my = self.layout_model.margin_top_px
+
+        canvas_cursor_y = top_padding + p_idx * (ph + gutter) + my + y_in_page
+        vh = self.viewport().height()
+        target_sy = int(canvas_cursor_y - vh / 2)
+        target_sy = max(0, min(self.verticalScrollBar().maximum(), target_sy))
+        self.verticalScrollBar().setValue(target_sy)
 
     def _cursor_page_index(self) -> int:
         block = self._doc.findBlock(self._cursor.position())
@@ -546,6 +634,191 @@ class PaginatedCanvas(QAbstractScrollArea):
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._is_mouse_selecting = False
+            self.ensure_cursor_visible()
+
+    def contextMenuEvent(self, event):
+        pt = event.pos()
+        pos = self._screen_point_to_doc_position(pt)
+        if pos is not None:
+            image_info = self._find_image_at_doc_position(pos)
+            if image_info:
+                img_cursor, img_fmt = image_info
+                self._show_image_context_menu(event.globalPos(), img_cursor, img_fmt)
+                return
+        super().contextMenuEvent(event)
+
+    def _find_image_at_doc_position(self, pos: int) -> Optional[Tuple[QTextCursor, QTextImageFormat]]:
+        """Finds if there is an image object at pos or preceding pos."""
+        for p in [pos, max(0, pos - 1)]:
+            c = QTextCursor(self._doc)
+            c.setPosition(p)
+            c.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor)
+            fmt = c.charFormat()
+            if fmt.isImageFormat():
+                return c, fmt.toImageFormat()
+        return None
+
+    def _show_image_context_menu(self, global_pos: QPoint, img_cursor: QTextCursor, img_fmt: QTextImageFormat) -> None:
+        """Presents a rich context menu tailored specifically for images (resize, crop, alignment, copy, save)."""
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #1f2335;
+                color: #c0caf5;
+                border: 1px solid #3b4261;
+                border-radius: 6px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 22px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #2e344e;
+                color: #ffffff;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #292e42;
+                margin: 4px 6px;
+            }
+        """)
+
+        act_resize = menu.addAction("📐 Resize Image...")
+        act_resize.triggered.connect(lambda: self._apply_image_resize(img_cursor, img_fmt))
+
+        act_crop = menu.addAction("✂️ Crop Image...")
+        act_crop.triggered.connect(lambda: self._apply_image_crop(img_cursor, img_fmt))
+
+        align_menu = menu.addMenu("📍 Placement & Alignment")
+        align_menu.setStyleSheet(menu.styleSheet())
+
+        act_inline = align_menu.addAction("In-line with Text")
+        act_inline.triggered.connect(lambda: self._set_image_alignment(img_cursor, None))
+
+        act_left = align_menu.addAction("Block: Align Left")
+        act_left.triggered.connect(lambda: self._set_image_alignment(img_cursor, Qt.AlignmentFlag.AlignLeft))
+
+        act_center = align_menu.addAction("Block: Align Center")
+        act_center.triggered.connect(lambda: self._set_image_alignment(img_cursor, Qt.AlignmentFlag.AlignHCenter))
+
+        act_right = align_menu.addAction("Block: Align Right")
+        act_right.triggered.connect(lambda: self._set_image_alignment(img_cursor, Qt.AlignmentFlag.AlignRight))
+
+        menu.addSeparator()
+
+        act_copy = menu.addAction("Copy Image")
+        act_copy.triggered.connect(lambda: self._copy_specific_image(img_fmt))
+
+        act_cut = menu.addAction("Cut Image")
+        act_cut.triggered.connect(lambda: self._cut_specific_image(img_cursor, img_fmt))
+
+        act_del = menu.addAction("Delete Image")
+        act_del.triggered.connect(lambda: self._delete_specific_image(img_cursor))
+
+        menu.addSeparator()
+
+        act_save_as = menu.addAction("Save Image As... (.jxl, .png)")
+        act_save_as.triggered.connect(lambda: self._save_image_to_file(img_fmt))
+
+        menu.exec(global_pos)
+
+    def _apply_image_resize(self, img_cursor: QTextCursor, img_fmt: QTextImageFormat) -> None:
+        from volumenodex.ui.image_resize_dialog import ImageResizeDialog
+        pw = int(self.layout_model.printable_width_px)
+        dlg = ImageResizeDialog(img_fmt.width(), img_fmt.height(), page_width=pw, parent=self)
+        if dlg.exec():
+            new_w, new_h = dlg.get_dimensions()
+            img_cursor.beginEditBlock()
+            img_cursor.removeSelectedText()
+            img_fmt.setWidth(new_w)
+            img_fmt.setHeight(new_h)
+            img_cursor.insertImage(img_fmt)
+            img_cursor.endEditBlock()
+            self.sync_document_geometry()
+            self.ensure_cursor_visible()
+            self.viewport().update()
+
+    def _apply_image_crop(self, img_cursor: QTextCursor, img_fmt: QTextImageFormat) -> None:
+        from volumenodex.ui.image_crop_dialog import ImageCropDialog
+        img_name = img_fmt.name()
+        img_var = self._doc.resource(QTextDocument.ResourceType.ImageResource, QUrl(img_name))
+        if not img_var or (isinstance(img_var, QImage) and img_var.isNull()):
+            img_var = load_image(img_name)
+        if not img_var or (isinstance(img_var, QImage) and img_var.isNull()):
+            return
+        qimg = img_var if isinstance(img_var, QImage) else QImage(img_var)
+        dlg = ImageCropDialog(qimg, image_path=img_name, parent=self)
+        if dlg.exec() and dlg.cropped_image and not dlg.cropped_image.isNull():
+            import time
+            crop_dir = os.path.expanduser("~/.volumenodex/cropped_images")
+            os.makedirs(crop_dir, exist_ok=True)
+            base_name = os.path.splitext(os.path.basename(img_name))[0] or "image"
+            cropped_path = os.path.join(crop_dir, f"{base_name}_cropped_{int(time.time() * 1000)}.jxl")
+            save_image(dlg.cropped_image, cropped_path)
+
+            self._doc.addResource(QTextDocument.ResourceType.ImageResource, QUrl.fromLocalFile(cropped_path), dlg.cropped_image)
+            img_cursor.beginEditBlock()
+            img_cursor.removeSelectedText()
+            new_fmt = QTextImageFormat()
+            new_fmt.setName(cropped_path)
+            new_fmt.setWidth(dlg.cropped_image.width())
+            new_fmt.setHeight(dlg.cropped_image.height())
+            img_cursor.insertImage(new_fmt)
+            img_cursor.endEditBlock()
+            self.sync_document_geometry()
+            self.ensure_cursor_visible()
+            self.viewport().update()
+
+    def _set_image_alignment(self, img_cursor: QTextCursor, alignment: Optional[Qt.AlignmentFlag]) -> None:
+        block = img_cursor.block()
+        bf = block.blockFormat()
+        if alignment is not None:
+            bf.setAlignment(alignment)
+            img_cursor.setBlockFormat(bf)
+        else:
+            bf.setAlignment(Qt.AlignmentFlag.AlignLeft)
+            img_cursor.setBlockFormat(bf)
+        self.sync_document_geometry()
+        self.viewport().update()
+
+    def _copy_specific_image(self, img_fmt: QTextImageFormat) -> None:
+        img_name = img_fmt.name()
+        img_var = self._doc.resource(QTextDocument.ResourceType.ImageResource, QUrl(img_name))
+        if not img_var or (isinstance(img_var, QImage) and img_var.isNull()):
+            img_var = load_image(img_name)
+        if img_var and not (isinstance(img_var, QImage) and img_var.isNull()):
+            qimg = img_var if isinstance(img_var, QImage) else QImage(img_var)
+            mime = QMimeData()
+            mime.setImageData(qimg)
+            mime.setText(img_name)
+            QApplication.clipboard().setMimeData(mime)
+
+    def _cut_specific_image(self, img_cursor: QTextCursor, img_fmt: QTextImageFormat) -> None:
+        self._copy_specific_image(img_fmt)
+        img_cursor.removeSelectedText()
+        self.sync_document_geometry()
+        self.ensure_cursor_visible()
+        self.viewport().update()
+
+    def _delete_specific_image(self, img_cursor: QTextCursor) -> None:
+        img_cursor.removeSelectedText()
+        self.sync_document_geometry()
+        self.ensure_cursor_visible()
+        self.viewport().update()
+
+    def _save_image_to_file(self, img_fmt: QTextImageFormat) -> None:
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Image As", "image.jxl", IMAGE_FILE_FILTER
+        )
+        if file_path:
+            img_name = img_fmt.name()
+            img_var = self._doc.resource(QTextDocument.ResourceType.ImageResource, QUrl(img_name))
+            if not img_var or (isinstance(img_var, QImage) and img_var.isNull()):
+                img_var = load_image(img_name)
+            if img_var and not (isinstance(img_var, QImage) and img_var.isNull()):
+                qimg = img_var if isinstance(img_var, QImage) else QImage(img_var)
+                save_image(qimg, file_path)
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -693,16 +966,11 @@ class PaginatedCanvas(QAbstractScrollArea):
         elif is_ctrl and key == Qt.Key.Key_A:
             self._cursor.select(QTextCursor.SelectionType.Document)
         elif is_ctrl and key == Qt.Key.Key_C:
-            if self._cursor.hasSelection():
-                QApplication.clipboard().setText(self._cursor.selectedText())
+            self.copy()
         elif is_ctrl and key == Qt.Key.Key_X:
-            if self._cursor.hasSelection():
-                QApplication.clipboard().setText(self._cursor.selectedText())
-                self._cursor.removeSelectedText()
+            self.cut()
         elif is_ctrl and key == Qt.Key.Key_V:
-            clip_text = QApplication.clipboard().text()
-            if clip_text:
-                self._cursor.insertText(clip_text)
+            self.paste()
         elif is_ctrl and key == Qt.Key.Key_B:
             fmt = QTextCharFormat()
             fmt.setFontWeight(QFont.Weight.Normal if self._cursor.charFormat().fontWeight() >= 700 else QFont.Weight.Bold)
@@ -774,6 +1042,8 @@ class PaginatedCanvas(QAbstractScrollArea):
             super().keyPressEvent(event)
             return
 
+        self._update_scroll_bars()
+        self.ensure_cursor_visible()
         self._reset_cursor_blink()
         self.cursorPositionChanged.emit()
         self.viewport().update()
@@ -1205,12 +1475,29 @@ class PaginatedCanvas(QAbstractScrollArea):
         self.sync_document_geometry()
         self.viewport().update()
 
-    def insert_image(self, file_path: str, width: Optional[int] = None) -> bool:
-        """Inserts an image into the document with auto-scaling to the printable page width."""
+    def insert_qimage(self, qimg: QImage, width: Optional[int] = None, alignment: Optional[Qt.AlignmentFlag] = None) -> bool:
+        """Inserts a QImage directly into the document, saving to persistent cache as JXL."""
+        if qimg.isNull():
+            return False
+        import time
+        pasted_dir = os.path.expanduser("~/.volumenodex/pasted_images")
+        os.makedirs(pasted_dir, exist_ok=True)
+        img_path = os.path.join(pasted_dir, f"pasted_image_{int(time.time() * 1000)}.jxl")
+        save_image(qimg, img_path)
+        return self.insert_image(img_path, width=width, alignment=alignment)
+
+    def insert_image(
+        self,
+        file_path: str,
+        width: Optional[int] = None,
+        alignment: Optional[Qt.AlignmentFlag] = None,
+        attribution_text: Optional[str] = None
+    ) -> bool:
+        """Inserts an image into the document with auto-scaling, JXL fidelity, alignment, and optional attribution."""
         if not os.path.exists(file_path):
             return False
-        img = QImage(file_path)
-        if img.isNull():
+        img = load_image(file_path)
+        if img is None or img.isNull():
             return False
 
         pw_print = self.layout_model.printable_width_px
@@ -1233,9 +1520,26 @@ class PaginatedCanvas(QAbstractScrollArea):
         img_fmt.setWidth(target_w)
         img_fmt.setHeight(target_h)
 
+        if alignment is not None:
+            bf = QTextBlockFormat()
+            bf.setAlignment(alignment)
+            self._cursor.insertBlock(bf)
+
         self._doc.addResource(QTextDocument.ResourceType.ImageResource, QUrl.fromLocalFile(file_path), img)
         self._cursor.insertImage(img_fmt)
+
+        if attribution_text:
+            attr_bf = QTextBlockFormat()
+            attr_bf.setAlignment(alignment if alignment is not None else Qt.AlignmentFlag.AlignHCenter)
+            attr_cf = QTextCharFormat()
+            attr_cf.setFontItalic(True)
+            attr_cf.setFontPointSize(9)
+            attr_cf.setForeground(QColor("#787c99"))
+            self._cursor.insertBlock(attr_bf, attr_cf)
+            self._cursor.insertText(attribution_text)
+
         self.sync_document_geometry()
+        self.ensure_cursor_visible()
         self.viewport().update()
         return True
 
@@ -1243,6 +1547,7 @@ class PaginatedCanvas(QAbstractScrollArea):
         bf = QTextBlockFormat()
         bf.setPageBreakPolicy(QTextBlockFormat.PageBreakFlag.PageBreak_AlwaysBefore)
         self._cursor.insertBlock(bf)
+        self.ensure_cursor_visible()
         self.viewport().update()
 
     # --- Editor Compatibility API ---
@@ -1280,37 +1585,97 @@ class PaginatedCanvas(QAbstractScrollArea):
         if not cursor.isNull():
             self._cursor = cursor
             self._reset_cursor_blink()
+            self.ensure_cursor_visible()
             self.viewport().update()
             return True
         return False
 
     def undo(self) -> None:
         self._doc.undo()
+        self.ensure_cursor_visible()
         self.viewport().update()
 
     def redo(self) -> None:
         self._doc.redo()
+        self.ensure_cursor_visible()
         self.viewport().update()
 
     def cut(self) -> None:
         if self._cursor.hasSelection():
-            QApplication.clipboard().setText(self._cursor.selectedText())
+            self.copy()
             self._cursor.removeSelectedText()
+            self.sync_document_geometry()
+            self.ensure_cursor_visible()
             self.viewport().update()
 
     def copy(self) -> None:
-        if self._cursor.hasSelection():
-            QApplication.clipboard().setText(self._cursor.selectedText())
+        if not self._cursor.hasSelection():
+            return
+        clipboard = QApplication.clipboard()
+        sel_text = self._cursor.selectedText()
+        if "\ufffc" in sel_text:
+            c = QTextCursor(self._cursor)
+            c.setPosition(self._cursor.selectionStart())
+            while c.position() < self._cursor.selectionEnd():
+                c.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor)
+                fmt = c.charFormat()
+                if fmt.isImageFormat():
+                    img_fmt = fmt.toImageFormat()
+                    img_name = img_fmt.name()
+                    img_var = self._doc.resource(QTextDocument.ResourceType.ImageResource, QUrl(img_name))
+                    if not img_var or (isinstance(img_var, QImage) and img_var.isNull()):
+                        img_var = load_image(img_name)
+                    if img_var and not (isinstance(img_var, QImage) and img_var.isNull()):
+                        qimg = img_var if isinstance(img_var, QImage) else QImage(img_var)
+                        mime = QMimeData()
+                        mime.setImageData(qimg)
+                        mime.setText(img_name)
+                        clipboard.setMimeData(mime)
+                        return
+                c.setPosition(c.position())
+        clipboard.setText(self._cursor.selectedText())
 
     def paste(self) -> None:
-        mime = QApplication.clipboard().mimeData()
-        if mime:
-            if mime.hasHtml():
-                self._cursor.insertHtml(mime.html())
-            elif mime.hasText():
-                self._cursor.insertText(mime.text())
-            self.sync_document_geometry()
-            self.viewport().update()
+        clipboard = QApplication.clipboard()
+        mime = clipboard.mimeData()
+        if not mime:
+            return
+
+        # 1. Image data on clipboard
+        if mime.hasImage():
+            qimg = clipboard.image()
+            if not qimg.isNull():
+                self.insert_qimage(qimg)
+                return
+
+        # 2. File URLs on clipboard
+        if mime.hasUrls():
+            for u in mime.urls():
+                local_f = u.toLocalFile()
+                if local_f and os.path.exists(local_f):
+                    ext = os.path.splitext(local_f)[1].lower()
+                    if ext in (".jxl", ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"):
+                        if self.insert_image(local_f):
+                            return
+
+        # 3. File path in text clipboard
+        if mime.hasText():
+            candidate = mime.text().strip().strip('"').strip("'")
+            if os.path.isfile(candidate):
+                ext = os.path.splitext(candidate)[1].lower()
+                if ext in (".jxl", ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"):
+                    if self.insert_image(candidate):
+                        return
+
+        # 4. Standard HTML or Text paste
+        if mime.hasHtml():
+            self._cursor.insertHtml(mime.html())
+        elif mime.hasText():
+            self._cursor.insertText(mime.text())
+
+        self.sync_document_geometry()
+        self.ensure_cursor_visible()
+        self.viewport().update()
 
     def paste_plain(self, text: Optional[str] = None) -> None:
         """Pastes plain text without any formatting, matching surrounding text format."""

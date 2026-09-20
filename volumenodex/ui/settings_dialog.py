@@ -236,6 +236,89 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(grp_goals)
 
+        # 4. Clipart Library Autoexpansion (Wikimedia Commons)
+        from PySide6.QtWidgets import QDoubleSpinBox
+        self.grp_autoexpansion = QGroupBox("CLIPART LIBRARY AUTOEXPANSION (WIKIMEDIA COMMONS)", self)
+        v_clipart = QVBoxLayout(self.grp_autoexpansion)
+        v_clipart.setSpacing(10)
+
+        self.chk_autoexpansion_enable = QCheckBox(
+            "Enable Clipart Autoexpansion (query Wikimedia Commons when < 3 local results)",
+            self.grp_autoexpansion
+        )
+        self.chk_autoexpansion_enable.setChecked(self.settings_manager.clipart_autoexpansion_enabled)
+        v_clipart.addWidget(self.chk_autoexpansion_enable)
+
+        h_size = QHBoxLayout()
+        h_size.setSpacing(12)
+        lbl_size = QLabel("Download Image Size:", self.grp_autoexpansion)
+        lbl_size.setStyleSheet("color: #9aa5ce; font-size: 12px;")
+        h_size.addWidget(lbl_size)
+
+        self.combo_autoexpansion_size = QComboBox(self.grp_autoexpansion)
+        self.combo_autoexpansion_size.addItem("500px Standard (Fast & Compact, Default)", "500px")
+        self.combo_autoexpansion_size.addItem("1000px High-Resolution", "1000px")
+        self.combo_autoexpansion_size.addItem("Full Original Size", "full")
+        idx_sz = self.combo_autoexpansion_size.findData(self.settings_manager.clipart_autoexpansion_size)
+        if idx_sz >= 0:
+            self.combo_autoexpansion_size.setCurrentIndex(idx_sz)
+        h_size.addWidget(self.combo_autoexpansion_size)
+        h_size.addStretch()
+        v_clipart.addLayout(h_size)
+
+        # Storage size limit
+        h_limit = QHBoxLayout()
+        h_limit.setSpacing(10)
+        lbl_limit = QLabel("Library Hard Drive Limit:", self.grp_autoexpansion)
+        lbl_limit.setStyleSheet("color: #9aa5ce; font-size: 12px;")
+        h_limit.addWidget(lbl_limit)
+
+        self.spin_limit_val = QDoubleSpinBox(self.grp_autoexpansion)
+        self.spin_limit_val.setRange(0.1, 9999.0)
+        self.spin_limit_val.setSingleStep(0.5)
+        self.spin_limit_val.setValue(self.settings_manager.clipart_size_limit_val)
+        self.spin_limit_val.setStyleSheet("""
+            QDoubleSpinBox {
+                background-color: #24283b;
+                border: 1px solid #3b4261;
+                border-radius: 4px;
+                color: #ffffff;
+                padding: 4px 8px;
+            }
+        """)
+        h_limit.addWidget(self.spin_limit_val)
+
+        self.combo_limit_unit = QComboBox(self.grp_autoexpansion)
+        self.combo_limit_unit.addItem("MB", "MB")
+        self.combo_limit_unit.addItem("GB", "GB")
+        self.combo_limit_unit.addItem("TB", "TB")
+        self.combo_limit_unit.addItem("KB", "KB")
+        idx_u = self.combo_limit_unit.findData(self.settings_manager.clipart_size_limit_unit)
+        if idx_u >= 0:
+            self.combo_limit_unit.setCurrentIndex(idx_u)
+        h_limit.addWidget(self.combo_limit_unit)
+        h_limit.addStretch()
+        v_clipart.addLayout(h_limit)
+
+        # License options
+        lbl_lic = QLabel("Allowed License Types:", self.grp_autoexpansion)
+        lbl_lic.setStyleSheet("color: #9aa5ce; font-size: 11px; font-weight: 600;")
+        v_clipart.addWidget(lbl_lic)
+
+        self.chk_pd_cc0 = QCheckBox("Public Domain & CC0 (No attribution needed, default)", self.grp_autoexpansion)
+        self.chk_pd_cc0.setChecked(self.settings_manager.clipart_license_pd_cc0)
+        v_clipart.addWidget(self.chk_pd_cc0)
+
+        self.chk_cc_by = QCheckBox("Creative Commons BY (Attribution saved in metadata & inserted below photo)", self.grp_autoexpansion)
+        self.chk_cc_by.setChecked(self.settings_manager.clipart_license_cc_by)
+        v_clipart.addWidget(self.chk_cc_by)
+
+        self.chk_cc_by_sa = QCheckBox("Creative Commons BY-SA (Attribution saved & inserted below photo)", self.grp_autoexpansion)
+        self.chk_cc_by_sa.setChecked(self.settings_manager.clipart_license_cc_by_sa)
+        v_clipart.addWidget(self.chk_cc_by_sa)
+
+        layout.addWidget(self.grp_autoexpansion)
+
         # Buttons
         layout.addSpacing(8)
         btn_layout = QHBoxLayout()
@@ -274,6 +357,30 @@ class SettingsDialog(QDialog):
 
         layout.addLayout(btn_layout)
 
+    def highlight_autoexpansion_limit(self) -> None:
+        """Visually highlights the autoexpansion storage limit controls when space is exceeded."""
+        self.grp_autoexpansion.setStyleSheet("""
+            QGroupBox {
+                background-color: #1f2335;
+                border: 2px solid #f7768e;
+                border-radius: 8px;
+                margin-top: 18px;
+                padding: 14px;
+                font-weight: 700;
+                color: #f7768e;
+            }
+        """)
+        self.spin_limit_val.setStyleSheet("""
+            QDoubleSpinBox {
+                background-color: #24283b;
+                border: 2px solid #f7768e;
+                border-radius: 4px;
+                color: #ffffff;
+                padding: 4px 8px;
+            }
+        """)
+        self.spin_limit_val.setFocus()
+
     def _on_autosave_toggle(self, checked: bool) -> None:
         self.combo_interval.setEnabled(checked)
 
@@ -284,5 +391,15 @@ class SettingsDialog(QDialog):
         self.settings_manager.show_crop_marks = self.chk_crop_marks.isChecked()
         self.settings_manager.auto_open_recent = self.chk_auto_open_recent.isChecked()
         self.settings_manager.daily_word_goal = self.spin_daily_goal.value()
+
+        # Clipart Autoexpansion settings
+        self.settings_manager.clipart_autoexpansion_enabled = self.chk_autoexpansion_enable.isChecked()
+        self.settings_manager.clipart_autoexpansion_size = str(self.combo_autoexpansion_size.currentData())
+        self.settings_manager.clipart_size_limit_val = self.spin_limit_val.value()
+        self.settings_manager.clipart_size_limit_unit = str(self.combo_limit_unit.currentData())
+        self.settings_manager.clipart_license_pd_cc0 = self.chk_pd_cc0.isChecked()
+        self.settings_manager.clipart_license_cc_by = self.chk_cc_by.isChecked()
+        self.settings_manager.clipart_license_cc_by_sa = self.chk_cc_by_sa.isChecked()
+
         self.settings_manager.save()
         self.accept()

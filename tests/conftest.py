@@ -11,3 +11,25 @@ def app():
     if not application:
         application = QApplication([])
     yield application
+    for widget in application.topLevelWidgets():
+        try:
+            if hasattr(widget, "_stop_threads"):
+                widget._stop_threads()
+            widget.close()
+        except Exception:
+            pass
+    application.processEvents()
+
+@pytest.fixture(autouse=True)
+def cleanup_widgets():
+    yield
+    app_instance = QApplication.instance()
+    if app_instance:
+        for widget in app_instance.topLevelWidgets():
+            try:
+                if hasattr(widget, "_stop_threads"):
+                    widget._stop_threads()
+                widget.close()
+            except Exception:
+                pass
+        app_instance.processEvents()
